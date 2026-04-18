@@ -1,0 +1,21 @@
+services:
+  exam-admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: exam-administration-system
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./schedule_storage:/app/schedule_storage
+      - ./database:/app/database
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

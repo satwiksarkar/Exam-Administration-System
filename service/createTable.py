@@ -1,0 +1,467 @@
+"""
+PDF Table Generation Service using ReportLab
+Generates formatted PDF tables from CSV data with merged cells for repeated first column values
+"""
+
+import csv
+import os
+from reportlab.lib.pagesizes import landscape, letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph, KeepTogether
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+def read_csv_data(csv_file_path):
+    """Read CSV file and return headers and rows"""
+    try:
+        data = []
+        headers = []
+        
+        with open(csv_file_path, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            headers = next(reader)
+            for row in reader:
+                data.append(row)
+        
+        logger.info(f"✓ Read CSV file: {csv_file_path} ({len(data)} rows, {len(headers)} columns)")
+        return headers, data
+    except Exception as e:
+        logger.error(f"❌ Error reading CSV: {str(e)}")
+        return [], []
+
+
+def merge_cells_for_column(headers, data, merge_column_index=0):
+    """
+    Merge cells in the specified column (can be any column, not just first)
+    Returns data with merge information and merged row indices
+    """
+    merged_rows = []
+    merge_info = {}  # {row_index: merge_span}
+    
+    if not data:
+        return data, merge_info
+    
+    i = 0
+    while i < len(data):
+        current_value = data[i][merge_column_index] if merge_column_index < len(data[i]) else ""
+        merge_start = i
+        
+        # Find how many consecutive rows have the same value in the specified column
+        j = i + 1
+        while j < len(data):
+            next_value = data[j][merge_column_index] if merge_column_index < len(data[j]) else ""
+            if next_value == current_value:
+                j += 1
+            else:
+                break
+        
+        # Record merge span for the column
+        merge_span = j - i
+        if merge_span > 1:
+            merge_info[merge_start] = merge_span
+        
+        i = j
+    
+    return data, merge_info
+
+
+def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
+    """
+    Generate a PDF table from CSV file with merged cells for specified grouping column
+    
+    Args:
+        csv_file_path: Path to input CSV file
+        pdf_output_path: Path where PDF will be saved
+        grouping_column_name: Column name to use for cell merging (e.g., 'Teacher', 'Staff', 'Room')
+                             If None, uses first column
+    
+    Returns:
+        Path to generated PDF file or None if failed
+    """
+    try:
+        logger.info(f"📄 Starting PDF generation from: {csv_file_path}")
+        
+        # Read CSV data
+        headers, data = read_csv_data(csv_file_path)
+        
+        if not headers or not data:
+            logger.error("❌ No data to generate PDF")
+            return None
+        
+        # --- Date formatting (YYYY-MM-DD -> DD/MM/YYYY) and ascending sort ---
+        # Find date column (case-insensitive)
+        date_col_idx = -1
+        shift_col_idx = -1
+        group_col_idx = -1
+        for idx, h in enumerate(headers):
+            if h.strip().lower() == 'date':
+                date_col_idx = idx
+            if h.strip().lower() == 'shift':
+                shift_col_idx = idx
+            if grouping_column_name and h.strip().lower() == grouping_column_name.lower():
+                group_col_idx = idx
+
+        if date_col_idx != -1:
+            # Sort: if grouping column exists, sort by group first, then date; otherwise just by date
+            def _sort_key(row):
+                raw = row[date_col_idx]
+                try:
+                    dt = datetime.strptime(raw, '%Y-%m-%d')
+                except Exception:
+                    try:
+                        dt = datetime.strptime(raw, '%d/%m/%Y')
+                    except Exception:
+                        dt = datetime.max
+                shift_order = 0
+                if shift_col_idx != -1:
+                    shift_order = 0 if row[shift_col_idx].strip().lower() == 'morning' else 1
+                
+                if group_col_idx != -1:
+                    return (row[group_col_idx], dt, shift_order)
+                return (dt, shift_order)
+
+            data.sort(key=_sort_key)
+
+            # Convert date strings to DD/MM/YYYY
+            for row in data:
+                raw = row[date_col_idx]
+                try:
+                    dt = datetime.strptime(raw, '%Y-%m-%d')
+                    row[date_col_idx] = dt.strftime('%d/%m/%Y')
+                except Exception:
+                    pass  # already formatted or unknown format, leave as-is
+
+            logger.info("✓ Dates formatted to DD/MM/YYYY and sorted ascending")
+        
+        # Determine which column to merge on
+        merge_column_index = 0
+        if grouping_column_name:
+            try:
+                merge_column_index = headers.index(grouping_column_name)
+                logger.info(f"✓ Using column '{grouping_column_name}' (index {merge_column_index}) for merging")
+            except ValueError:
+                logger.warning(f"⚠️ Column '{grouping_column_name}' not found, using first column")
+                merge_column_index = 0
+        
+        # Merge cells for specified column
+        data, merge_info = merge_cells_for_column(headers, data, merge_column_index=merge_column_index)
+        
+        # Create table data with headers
+        table_data = [headers] + data
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(
+            pdf_output_path,
+            pagesize=landscape(letter),
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor=colors.HexColor('#1f497d'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Create story (elements to add to PDF)
+        story = []
+        
+        # Add title
+        title = "Schedule Report"
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Calculate column widths
+        num_cols = len(headers)
+        col_width = (8 * inch) / num_cols  # Landscape width with margins
+        col_widths = [col_width] * num_cols
+        
+        # Create table
+        table = Table(table_data, colWidths=col_widths)
+        
+        # Apply table styling
+        table_style = [
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f497d')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            
+            # Data row styling
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 1), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 6),
+            
+            # Alternate row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
+            
+            # Grid lines
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ('LINEABOVE', (0, 0), (-1, 0), 2, colors.HexColor('#1f497d')),
+            ('LINEBELOW', (0, -1), (-1, -1), 2, colors.HexColor('#1f497d')),
+        ]
+        
+        # Apply vertical merges for specified column (merge cells with same values)
+        current_row = 1  # Start after header
+        while current_row < len(table_data):
+            if current_row - 1 in merge_info:
+                merge_span = merge_info[current_row - 1]
+                if merge_span > 1:
+                    # Add merge command for specified column
+                    table_style.append(
+                        ('VALIGN', (merge_column_index, current_row), (merge_column_index, current_row + merge_span - 1), 'MIDDLE')
+                    )
+                    table_style.append(
+                        ('ALIGN', (merge_column_index, current_row), (merge_column_index, current_row + merge_span - 1), 'CENTER')
+                    )
+                    
+                    # Merge cells by clearing duplicate values
+                    for i in range(1, merge_span):
+                        table_data[current_row + i][merge_column_index] = ""
+                
+                current_row += merge_span
+            else:
+                current_row += 1
+        
+        # Rebuild table with merged data
+        table = Table(table_data, colWidths=col_widths)
+        table.setStyle(TableStyle(table_style))
+        
+        story.append(table)
+        
+        # Build PDF
+        doc.build(story)
+        
+        logger.info(f"✓ PDF generated successfully: {pdf_output_path}")
+        return pdf_output_path
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating PDF: {str(e)}")
+        return None
+
+
+def create_all_schedules_pdf(csv_dir, pdf_output_dir):
+    """
+    Generate PDFs for all schedule CSV files in a directory
+    
+    Args:
+        csv_dir: Directory containing CSV files
+        pdf_output_dir: Directory where PDFs will be saved
+    
+    Returns:
+        Dictionary of {csv_filename: pdf_path}
+    """
+    try:
+        if not os.path.exists(pdf_output_dir):
+            os.makedirs(pdf_output_dir)
+        
+        pdf_paths = {}
+        
+        # Expected CSV files
+        csv_files = [
+            'exam_schedule.csv',
+            'teacher_schedule.csv',
+            'staff_schedule.csv',
+            'room_schedule.csv'
+        ]
+        
+        for csv_file in csv_files:
+            csv_path = os.path.join(csv_dir, csv_file)
+            if os.path.exists(csv_path):
+                pdf_name = csv_file.replace('.csv', '.pdf')
+                pdf_path = os.path.join(pdf_output_dir, pdf_name)
+                
+                result = create_table_pdf(csv_path, pdf_path)
+                if result:
+                    pdf_paths[csv_file] = result
+                    logger.info(f"✓ Generated PDF: {pdf_name}")
+        
+        return pdf_paths
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating all PDFs: {str(e)}")
+        return {}
+
+
+def create_personnel_report_pdf(csv_file_path, pdf_output_path, is_staff=False):
+    """
+    Generate a custom PDF report for personnel (teachers or staff) from the schedule CSV.
+    Shows each person, total duties, and a table of their assignments (Date, Shift, Room).
+    """
+    try:
+        report_title = "Staff Invigilation Report" if is_staff else "Faculty Invigilation Report"
+        label = "Staff" if is_staff else "Faculty"
+        logger.info(f"📄 Starting {label} PDF generation from: {csv_file_path}")
+        
+        headers, data = read_csv_data(csv_file_path)
+        if not headers or not data:
+            logger.error("❌ No data to generate PDF")
+            return None
+            
+        # Extract indices
+        try:
+            d_idx = headers.index('Date')
+            s_idx = headers.index('Shift')
+            r_idx = headers.index('Room')
+            
+            p_idx = -1
+            if is_staff and 'Staff' in headers:
+                p_idx = headers.index('Staff')
+            elif not is_staff and 'Teacher' in headers:
+                p_idx = headers.index('Teacher')
+                
+            has_person_col = (p_idx != -1)
+            
+            if not has_person_col and not is_staff:
+                role_idx = headers.index('Role')
+                f1_idx = headers.index('Faculty1')
+                f2_idx = headers.index('Faculty2')
+        except ValueError as e:
+            logger.error(f"❌ Missing expected column in CSV: {str(e)}")
+            return None
+            
+        personnel_map = {}
+        for row in data:
+            if has_person_col:
+                person = row[p_idx]
+            elif not is_staff and not has_person_col:
+                role = row[role_idx]
+                person = row[f1_idx] if role == 'Faculty1' else row[f2_idx]
+            else:
+                person = None
+                
+            if not person or person == 'N/A' or person == '---':
+                continue
+                
+            # Date Formatting (YYYY-MM-DD -> DD/MM/YYYY) and sorting preservation
+            raw_date = row[d_idx]
+            sort_key = raw_date
+            try:
+                dt_obj = datetime.strptime(raw_date, '%Y-%m-%d')
+                fmt_date = dt_obj.strftime('%d/%m/%Y')
+                sort_key = dt_obj # Sort by actual precise datetime
+            except Exception:
+                fmt_date = raw_date
+                
+            if person not in personnel_map:
+                personnel_map[person] = []
+            personnel_map[person].append({
+                'date': fmt_date,
+                'shift': row[s_idx],
+                'room': row[r_idx],
+                'sort_key': sort_key
+            })
+            
+        doc = SimpleDocTemplate(
+            pdf_output_path,
+            pagesize=letter,
+            rightMargin=0.75*inch,
+            leftMargin=0.75*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
+        
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor=colors.HexColor('#1f497d'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        teacher_name_style = ParagraphStyle(
+            'PersonName',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#2c3e50'),
+            spaceBefore=15,
+            spaceAfter=5,
+            fontName='Helvetica-Bold'
+        )
+        
+        duties_style = ParagraphStyle(
+            'DutiesStyle',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor=colors.HexColor('#e74c3c'),
+            spaceAfter=10,
+            fontName='Helvetica-Oblique'
+        )
+        
+        story = []
+        
+        story.append(Paragraph(report_title, title_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Sort personnel alphabetically
+        for person in sorted(personnel_map.keys()):
+            assignments = personnel_map[person]
+            
+            # Sort appointments ascending by date object, then shift
+            assignments.sort(key=lambda x: (x['sort_key'], x['shift']))
+            
+            person_block = []
+            
+            # Print Person Name and Duty Count
+            person_block.append(Paragraph(f"{label}: {person}", teacher_name_style))
+            person_block.append(Paragraph(f"Total Assigned Duties: {len(assignments)}", duties_style))
+            
+            # Build mini-table (Removed Role Column)
+            table_data = [["Date", "Shift", "Room"]]
+            for asn in assignments:
+                table_data.append([asn['date'], asn['shift'], asn['room']])
+                
+            col_widths = [2*inch, 2*inch, 2*inch]
+            t = Table(table_data, colWidths=col_widths)
+            
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                
+                ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+            ]))
+            
+            person_block.append(t)
+            person_block.append(Spacer(1, 0.3*inch))
+            
+            story.append(KeepTogether(person_block))
+            
+        doc.build(story)
+        logger.info(f"✓ {label} PDF generated successfully: {pdf_output_path}")
+        return pdf_output_path
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating {label} PDF: {str(e)}")
+        return None

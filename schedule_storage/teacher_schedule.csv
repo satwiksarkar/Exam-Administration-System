@@ -1,0 +1,9 @@
+Date,Room,Shift,Faculty1,Faculty2,Staff,Role
+2026-04-24,Room 101,Afternoon,F1,F2,S3,Faculty1
+2026-04-24,Room 102,Morning,F1,F3,S3,Faculty1
+2026-04-24,Room 101,Morning,F2,F4,S1,Faculty1
+2026-04-24,Room 101,Afternoon,F1,F2,S3,Faculty2
+2026-04-24,Room 102,Morning,F1,F3,S3,Faculty2
+2026-04-24,Room 102,Afternoon,F3,F4,S2,Faculty1
+2026-04-24,Room 101,Morning,F2,F4,S1,Faculty2
+2026-04-24,Room 102,Afternoon,F3,F4,S2,Faculty2

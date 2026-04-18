@@ -1,0 +1,41 @@
+Date,Room,Shift,Faculty1,Faculty2,Staff
+2026-04-17,Room 101,Morning,Dr. Robert Brown,prof.Santanu Ghosh,Ms. Jennifer Lopez
+2026-04-17,Room 101,Afternoon,Dr. Robert Brown,prof.Santanu Ghosh,Mr. David Garcia
+2026-04-17,Room 102,Morning,Ms. Sarah Davis,Dr. Michael Wilson,Mr. David Garcia
+2026-04-17,Room 102,Afternoon,Dr. John Smith,Ms. Sarah Davis,Ms. Lisa Martinez
+2026-04-17,Room 103,Morning,Dr. John Smith,Prof. Mary Johnson,Ms. Lisa Martinez
+2026-04-17,Room 103,Afternoon,,,
+2026-04-17,Room 201,Morning,,,Mr. James Anderson
+2026-04-17,Room 201,Afternoon,Prof. Mary Johnson,Dr. Michael Wilson,Ms. Jennifer Lopez
+2026-04-17,Room 202,Morning,,,
+2026-04-17,Room 202,Afternoon,,,Mr. James Anderson
+2026-04-18,Room 101,Morning,Ms. Sarah Davis,prof.Santanu Ghosh,Mr. James Anderson
+2026-04-18,Room 101,Afternoon,Dr. Robert Brown,prof.Santanu Ghosh,Ms. Lisa Martinez
+2026-04-18,Room 102,Morning,Prof. Mary Johnson,Dr. Robert Brown,Mr. David Garcia
+2026-04-18,Room 102,Afternoon,Prof. Mary Johnson,Dr. Michael Wilson,Ms. Jennifer Lopez
+2026-04-18,Room 103,Morning,Dr. John Smith,Dr. Michael Wilson,Ms. Lisa Martinez
+2026-04-18,Room 103,Afternoon,Dr. John Smith,Ms. Sarah Davis,Mr. James Anderson
+2026-04-18,Room 201,Morning,,,Ms. Jennifer Lopez
+2026-04-18,Room 201,Afternoon,,,Mr. David Garcia
+2026-04-18,Room 202,Morning,,,
+2026-04-18,Room 202,Afternoon,,,
+2026-04-19,Room 101,Morning,Dr. Robert Brown,Ms. Sarah Davis,Mr. David Garcia
+2026-04-19,Room 101,Afternoon,Dr. Robert Brown,prof.Santanu Ghosh,Ms. Jennifer Lopez
+2026-04-19,Room 102,Morning,Dr. Michael Wilson,prof.Santanu Ghosh,Ms. Jennifer Lopez
+2026-04-19,Room 102,Afternoon,Dr. John Smith,Prof. Mary Johnson,Mr. David Garcia
+2026-04-19,Room 103,Morning,Dr. John Smith,Prof. Mary Johnson,Ms. Lisa Martinez
+2026-04-19,Room 103,Afternoon,,,Ms. Lisa Martinez
+2026-04-19,Room 201,Morning,,,Mr. James Anderson
+2026-04-19,Room 201,Afternoon,Ms. Sarah Davis,Dr. Michael Wilson,
+2026-04-19,Room 202,Morning,,,
+2026-04-19,Room 202,Afternoon,,,Mr. James Anderson
+2026-04-20,Room 101,Morning,Dr. Robert Brown,Dr. Michael Wilson,Ms. Lisa Martinez
+2026-04-20,Room 101,Afternoon,Dr. Robert Brown,Ms. Sarah Davis,Ms. Lisa Martinez
+2026-04-20,Room 102,Morning,Dr. John Smith,Prof. Mary Johnson,Mr. David Garcia
+2026-04-20,Room 102,Afternoon,Dr. Michael Wilson,prof.Santanu Ghosh,Ms. Jennifer Lopez
+2026-04-20,Room 103,Morning,,,Mr. James Anderson
+2026-04-20,Room 103,Afternoon,Dr. John Smith,Prof. Mary Johnson,Mr. David Garcia
+2026-04-20,Room 201,Morning,Ms. Sarah Davis,prof.Santanu Ghosh,Ms. Jennifer Lopez
+2026-04-20,Room 201,Afternoon,,,Mr. James Anderson
+2026-04-20,Room 202,Morning,,,
+2026-04-20,Room 202,Afternoon,,,
