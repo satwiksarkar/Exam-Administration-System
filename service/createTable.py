@@ -260,6 +260,179 @@ def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
         return None
 
 
+def create_room_tables_pdf(csv_file_path, pdf_output_path):
+    """
+    Generate a PDF with separate tables for each room from the room schedule CSV
+    
+    Args:
+        csv_file_path: Path to room schedule CSV file
+        pdf_output_path: Path where PDF will be saved
+        
+    Returns:
+        Path to generated PDF file or None if failed
+    """
+    try:
+        logger.info(f"📄 Creating room-specific PDF from: {csv_file_path}")
+        
+        # Read CSV data
+        headers, data = read_csv_data(csv_file_path)
+        
+        if not headers or not data:
+            logger.error("❌ No data to generate PDF")
+            return None
+        
+        # Group data by room
+        rooms_data = {}
+        for row in data:
+            # Find room column (usually index 1, but let's be safe)
+            room_idx = -1
+            for idx, h in enumerate(headers):
+                if h.strip().lower() == 'room':
+                    room_idx = idx
+                    break
+            
+            if room_idx >= 0 and room_idx < len(row):
+                room_name = row[room_idx]
+                if room_name not in rooms_data:
+                    rooms_data[room_name] = []
+                rooms_data[room_name].append(row)
+        
+        # Sort data by date within each room
+        date_col_idx = -1
+        shift_col_idx = -1
+        for idx, h in enumerate(headers):
+            if h.strip().lower() == 'date':
+                date_col_idx = idx
+            if h.strip().lower() == 'shift':
+                shift_col_idx = idx
+        
+        for room in rooms_data:
+            if date_col_idx != -1:
+                def _sort_key(row):
+                    raw = row[date_col_idx] if date_col_idx < len(row) else ""
+                    try:
+                        dt = datetime.strptime(raw, '%Y-%m-%d')
+                    except Exception:
+                        try:
+                            dt = datetime.strptime(raw, '%d/%m/%Y')
+                        except Exception:
+                            dt = datetime.max
+                    shift_order = 0
+                    if shift_col_idx != -1 and shift_col_idx < len(row):
+                        shift_order = 0 if row[shift_col_idx].strip().lower() == 'morning' else 1
+                    return (dt, shift_order)
+                
+                rooms_data[room].sort(key=_sort_key)
+                
+                # Convert date format
+                for row in rooms_data[room]:
+                    if date_col_idx < len(row):
+                        raw = row[date_col_idx]
+                        try:
+                            dt = datetime.strptime(raw, '%Y-%m-%d')
+                            row[date_col_idx] = dt.strftime('%d/%m/%Y')
+                        except Exception:
+                            pass
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(
+            pdf_output_path,
+            pagesize=landscape(letter),
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor=colors.HexColor('#1f497d'),
+            spaceAfter=12,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        room_style = ParagraphStyle(
+            'RoomTitle',
+            parent=styles['Heading2'],
+            fontSize=13,
+            textColor=colors.HexColor('#2e5090'),
+            spaceAfter=10,
+            spaceBefore=15,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Create story (elements to add to PDF)
+        story = []
+        
+        # Add main title
+        title = "Room Schedule Report"
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Calculate column widths
+        num_cols = len(headers)
+        col_width = (8 * inch) / num_cols
+        col_widths = [col_width] * num_cols
+        
+        # Create table for each room
+        for room_name in sorted(rooms_data.keys()):
+            room_table_data = [headers] + rooms_data[room_name]
+            
+            # Create table
+            table = Table(room_table_data, colWidths=col_widths)
+            
+            # Apply table styling
+            table_style = [
+                # Header styling
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f497d')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                
+                # Data row styling
+                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                ('LEFTPADDING', (0, 1), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 1), (-1, -1), 4),
+                
+                # Alternate row colors
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
+                
+                # Grid lines
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+                ('LINEABOVE', (0, 0), (-1, 0), 2, colors.HexColor('#1f497d')),
+                ('LINEBELOW', (0, -1), (-1, -1), 2, colors.HexColor('#1f497d')),
+            ]
+            
+            table.setStyle(TableStyle(table_style))
+            
+            # Add room title
+            story.append(Paragraph(f"Room: {room_name}", room_style))
+            story.append(table)
+            story.append(Spacer(1, 0.3*inch))
+        
+        # Build PDF
+        doc.build(story)
+        
+        logger.info(f"✓ PDF generated successfully with {len(rooms_data)} room(s): {pdf_output_path}")
+        return pdf_output_path
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating room PDF: {str(e)}")
+        return None
+
+
 def create_all_schedules_pdf(csv_dir, pdf_output_dir):
     """
     Generate PDFs for all schedule CSV files in a directory

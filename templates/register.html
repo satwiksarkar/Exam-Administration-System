@@ -822,6 +822,7 @@
                     <!-- Teachers List -->
                     <div class="faculty-list-section">
                         <h3>📋 Registered Teachers</h3>
+                        <button class="faculty-delete-btn" onclick="deleteAllTeachers()" style="width: 100%; margin-bottom: 1rem; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); padding: 0.75rem; font-size: 0.95rem;">🗑️ Delete All Teachers</button>
                         <div class="faculty-members-list" id="teachersList">
                             {% if teachers %}
                                 {% for teacher in teachers %}
@@ -871,6 +872,7 @@
                     <!-- Staff List -->
                     <div class="staff-list-section">
                         <h3>📋 Registered Staff</h3>
+                        <button class="staff-delete-btn" onclick="deleteAllStaff()" style="width: 100%; margin-bottom: 1rem; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); padding: 0.75rem; font-size: 0.95rem;">🗑️ Delete All Staff</button>
                         <div class="staff-members-list" id="staffList">
                             {% if staff %}
                                 {% for staff_member in staff %}
@@ -1200,6 +1202,58 @@
                 btn.textContent = originalText;
                 btn.disabled = false;
                 fileInput.value = '';
+            }
+        }
+
+        // Delete all teachers
+        async function deleteAllTeachers() {
+            if (!confirm('⚠️ Are you sure you want to delete ALL teachers? This cannot be undone!')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/delete-all-teachers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(result.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                console.error('❌ Error:', error);
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Delete all staff
+        async function deleteAllStaff() {
+            if (!confirm('⚠️ Are you sure you want to delete ALL staff? This cannot be undone!')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/delete-all-staff', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(result.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                console.error('❌ Error:', error);
+                alert('Error: ' + error.message);
             }
         }
     </script>

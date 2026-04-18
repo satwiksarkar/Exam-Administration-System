@@ -107,4 +107,22 @@ def get_all_data():
         'teachers': read_teachers(),
         'staff': read_staff(),
         'rooms': read_rooms()
-    } 
+    }
+
+def delete_all_teachers():
+    """Delete all teachers from the database"""
+    ensure_database_dir()
+    if os.path.exists(TEACHERS_FILE):
+        with open(TEACHERS_FILE, 'w', encoding='utf-8') as f:
+            f.write('')
+        return True
+    return False
+
+def delete_all_staff():
+    """Delete all staff from the database"""
+    ensure_database_dir()
+    if os.path.exists(STAFF_FILE):
+        with open(STAFF_FILE, 'w', encoding='utf-8') as f:
+            f.write('')
+        return True
+    return False 

@@ -36,8 +36,8 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # Import the scheduling logic and constants
 from service.schedule import formal_scheduler_api, MAIN_SCHEDULE_CSV, TEACHER_SCHEDULE_CSV, STAFF_SCHEDULE_CSV, ROOM_SCHEDULE_CSV
-from service.db import read_teachers, read_staff, read_rooms, add_teacher, add_staff, add_room, delete_teacher, delete_staff, delete_room, get_all_data
-from service.createTable import create_table_pdf
+from service.db import read_teachers, read_staff, read_rooms, add_teacher, add_staff, add_room, delete_teacher, delete_staff, delete_room, get_all_data, delete_all_teachers, delete_all_staff
+from service.createTable import create_table_pdf, create_room_tables_pdf
 
 @app.route('/')
 def index():
@@ -118,6 +118,32 @@ def api_delete_staff():
         else:
             return jsonify({'success': False, 'error': 'Staff not found'}), 404
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route("/api/delete-all-teachers", methods=['POST'])
+def api_delete_all_teachers():
+    """API to delete all teachers"""
+    try:
+        if delete_all_teachers():
+            logger.info('🗑️ All teachers deleted')
+            return jsonify({'success': True, 'message': 'All teachers deleted successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to delete teachers'}), 400
+    except Exception as e:
+        logger.error(f'❌ Error deleting all teachers: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route("/api/delete-all-staff", methods=['POST'])
+def api_delete_all_staff():
+    """API to delete all staff"""
+    try:
+        if delete_all_staff():
+            logger.info('🗑️ All staff deleted')
+            return jsonify({'success': True, 'message': 'All staff deleted successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to delete staff'}), 400
+    except Exception as e:
+        logger.error(f'❌ Error deleting all staff: {str(e)}')
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/register-room", methods=['POST'])
@@ -530,7 +556,11 @@ def download_pdf():
         pdf_path = os.path.join(SCHEDULE_STORAGE_DIR, pdf_filename)
         
         # Create PDF from CSV
-        if pdf_type in ['teacher', 'staff']:
+        if pdf_type == 'room':
+            # Use special room-per-table PDF generation
+            from service.createTable import create_room_tables_pdf
+            result = create_room_tables_pdf(csv_path, pdf_path)
+        elif pdf_type in ['teacher', 'staff']:
             from service.createTable import create_personnel_report_pdf
             is_staff = (pdf_type == 'staff')
             result = create_personnel_report_pdf(csv_path, pdf_path, is_staff=is_staff)
