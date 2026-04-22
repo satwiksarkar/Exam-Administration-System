@@ -9,6 +9,13 @@ import logging
 import sys
 import re
 import PyPDF2
+import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image
+
+# Explicitly set Tesseract path for Windows
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
 
 # Setup logging with both file and console output
 logging.basicConfig(
@@ -187,6 +194,7 @@ def upload_pdf_list():
         
         file = request.files['file']
         role = request.form.get('role', '').strip()  # 'teacher' or 'staff'
+        use_ocr = request.form.get('use_ocr', 'false').lower() == 'true'
         
         if file.filename == '':
             return jsonify({'success': False, 'error': 'No selected file'}), 400
@@ -195,12 +203,48 @@ def upload_pdf_list():
             return jsonify({'success': False, 'error': 'Invalid role specified'}), 400
 
         if file and file.filename.lower().endswith('.pdf'):
-            reader = PyPDF2.PdfReader(file)
             text = ""
-            for page in reader.pages:
-                extracted = page.extract_text()
-                if extracted:
-                    text += extracted + "\n"
+            
+            # Read file bytes to process
+            file_bytes = file.read()
+            
+            if use_ocr:
+                try:
+                    logger.info("Using OCR for PDF parsing...")
+                    pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+                    for page_num in range(pdf_document.page_count):
+                        page = pdf_document.load_page(page_num)
+                        # Render page to an image (higher resolution for better OCR)
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        
+                        # Use tesseract to extract text from image
+                        extracted = pytesseract.image_to_string(img)
+                        if extracted:
+                            text += extracted + "\n"
+                    logger.info(f"OCR Extracted {len(text)} characters.")
+                except pytesseract.TesseractNotFoundError:
+                    return jsonify({
+                        'success': False, 
+                        'error': 'Tesseract OCR is not installed or not found in PATH on this server. Please install Tesseract-OCR and try again.'
+                    }), 500
+                except Exception as eval_e:
+                    logger.error(f'OCR Failed: {str(eval_e)}')
+                    return jsonify({'success': False, 'error': f'OCR Processing failed: {str(eval_e)}'}), 500
+            else:
+                # Normal text-based PDF parsing
+                reader = PyPDF2.PdfReader(BytesIO(file_bytes))
+                for page in reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+                
+                # Check if it was empty, suggesting user should use OCR
+                if len(text.strip()) < 5:
+                    return jsonify({
+                        'success': False, 
+                        'error': 'No text could be extracted. The PDF might be a scanned image or handwritten. Please check "Enable OCR" and try again.'
+                    }), 400
                 
             lines = text.split('\n')
             added_count = 0
@@ -211,6 +255,9 @@ def upload_pdf_list():
                     continue
                 # Clean up leading numbers like "1. ", "2) ", "10."
                 cleaned_name = re.sub(r'^\d+[\.\)]\s*', '', line).strip()
+                
+                # Further cleanup for OCR typical artifacts: Remove extra weird characters
+                cleaned_name = re.sub(r'[^\w\s\.-]', '', cleaned_name).strip()
                 
                 # Minimum length to be considered a name
                 if len(cleaned_name) > 2:
@@ -282,13 +329,18 @@ def generate_schedule():
         if not isinstance(two_shift_preferences, list):
             two_shift_preferences = []
         
+        # Extract per-room requirements
+        req_fac = int(data.get('req_fac', 2))
+        req_stf = int(data.get('req_stf', 1))
+        
         if preferences:
             logger.info(f'✓ Applied {len(preferences)} preference rules')
         if two_shift_preferences:
             logger.info(f'✓ Applied {len(two_shift_preferences)} two-shift preferences')
+        logger.info(f'✓ Room config: {req_fac} faculty, {req_stf} staff per room')
         
         # Call the scheduling function with the new API and preferences
-        results, status = formal_scheduler_api(teachers, staff, rooms, exam_dates, preferences, two_shift_preferences)
+        results, status = formal_scheduler_api(teachers, staff, rooms, exam_dates, preferences, two_shift_preferences, req_fac=req_fac, req_stf=req_stf)
         
         # Convert results to more readable format with actual names
         formatted_results = []
@@ -297,22 +349,26 @@ def generate_schedule():
             shift_idx = result.get('shift', 0)
             room_idx = result.get('room', 0)
             
+            fac_names = [teachers[i] if 0 <= i < len(teachers) else 'N/A' for i in result.get('faculties', [])]
+            stf_names = [staff[i] if 0 <= i < len(staff) else 'N/A' for i in result.get('staffs', [])]
+            
             formatted_results.append({
                 'date': exam_dates[date_idx] if date_idx < len(exam_dates) else f'Date {date_idx + 1}',
                 'shift': shifts[shift_idx] if shift_idx < len(shifts) else f'Shift {shift_idx + 1}',
                 'room': rooms[room_idx] if room_idx < len(rooms) else f'Room {room_idx + 1}',
-                'faculty1': teachers[result.get('faculty1', 0)] if result.get('faculty1', 0) < len(teachers) else 'N/A',
-                'faculty2': teachers[result.get('faculty2', 0)] if result.get('faculty2', 0) < len(teachers) else 'N/A',
-                'staff': staff[result.get('staff', 0)] if result.get('staff', 0) < len(staff) else 'N/A'
+                'faculties': fac_names,
+                'staffs': stf_names
             })
         
         logger.info(f'✓ Schedule generated successfully with {len(formatted_results)} assignments')
         logger.info(f'📂 Status: {status["message"]}')
         
+        version_name = data.get('version_name')
+        
         # Generate CSV and display schedule with comprehensive logs
         from service.schedule import display_schedule
         try:
-            csv_path = display_schedule(results, teachers, staff, rooms, exam_dates)
+            csv_path = display_schedule(results, teachers, staff, rooms, exam_dates, version_name=version_name)
             logger.info(f'✅ CSV successfully saved to: {csv_path}')
         except Exception as e:
             logger.error(f'❌ Error generating CSV: {str(e)}')
@@ -330,6 +386,217 @@ def generate_schedule():
             'error': str(e)
         }), 400
 
+@app.route('/api/emergency_reschedule', methods=['POST'])
+def emergency_reschedule():
+    """Takes an absentee and date, loads DB, and regenerates balanced schedule."""
+    try:
+        from service.db import get_schedule_assignments, read_teachers, read_staff, read_rooms
+        data = request.json
+        person = data.get('person')
+        em_date = data.get('emergency_date')
+        schedule_id = data.get('schedule_id')
+        
+        if not person or not em_date or not schedule_id:
+            return jsonify({'success': False, 'error': 'Person, emergency date, and schedule ID required.'}), 400
+            
+        locked_assignments = get_schedule_assignments(schedule_id)
+        if not locked_assignments:
+            return jsonify({'success': False, 'error': 'No prior schedule found in database for that ID.'}), 400
+            
+        # Normalise exam_date: MySQL returns datetime.date objects; convert to plain "YYYY-MM-DD" strings
+        for row in locked_assignments:
+            if hasattr(row['exam_date'], 'strftime'):
+                row['exam_date'] = row['exam_date'].strftime('%Y-%m-%d')
+
+        # Determine the exam dates from the prior assignments
+        dates_ordered = []
+        for row in locked_assignments:
+            if row['exam_date'] not in dates_ordered:
+                dates_ordered.append(row['exam_date'])
+        
+        teachers = read_teachers()
+        staff = read_staff()
+        rooms = read_rooms()
+        shifts = ["Morning", "Afternoon"]
+
+        
+        results, status = formal_scheduler_api(
+            teachers, staff, rooms, dates_ordered, 
+            preferences=None, two_shift_preferences=None,
+            locked_assignments=locked_assignments,
+            emergency_absence=person,
+            emergency_date=em_date
+        )
+        
+        formatted_results = []
+        for result in results:
+            date_idx = result.get('date', 0)
+            shift_idx = result.get('shift', 0)
+            room_idx = result.get('room', 0)
+            
+            fac_names = [teachers[i] if 0 <= i < len(teachers) else 'N/A' for i in result.get('faculties', [])]
+            stf_names = [staff[i] if 0 <= i < len(staff) else 'N/A' for i in result.get('staffs', [])]
+            
+            formatted_results.append({
+                'date': dates_ordered[date_idx],
+                'shift': shifts[shift_idx],
+                'room': rooms[room_idx],
+                'faculties': fac_names,
+                'staffs': stf_names
+            })
+            
+        from service.schedule import display_schedule
+        display_schedule(results, teachers, staff, rooms, dates_ordered, version_name=f"EmResched_{person}")
+        
+        return jsonify({'success': True, 'results': formatted_results, 'status': status})
+    except Exception as e:
+        logger.error(f'❌ Emergency reschedule failed: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/routines', methods=['GET'])
+def get_routines():
+    try:
+        from service.db import get_all_schedules
+        routines = get_all_schedules()
+        for r in routines:
+            if 'created_at' in r and r['created_at']:
+                r['created_at'] = r['created_at'].strftime('%Y-%m-%dT%H:%M:%S')
+        return jsonify({'success': True, 'routines': routines})
+    except Exception as e:
+        logger.error(f'❌ Failed to get routines: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/routine/<int:schedule_id>', methods=['GET'])
+def get_routine(schedule_id):
+    try:
+        from service.db import get_schedule_assignments, read_teachers, read_staff, read_rooms
+        assignments = get_schedule_assignments(schedule_id)
+        if not assignments:
+            return jsonify({'success': False, 'error': 'Routine not found'}), 404
+        
+        teachers = read_teachers()
+        staff = read_staff()
+        rooms = read_rooms()
+        
+        # Normalise exam_date: MySQL returns datetime.date objects; convert to plain "YYYY-MM-DD" strings
+        for a in assignments:
+            if hasattr(a['exam_date'], 'strftime'):
+                a['exam_date'] = a['exam_date'].strftime('%Y-%m-%d')
+
+        # Determine the unique exam dates and sort them or keep original order.
+        unique_dates = sorted(list(set([row['exam_date'] for row in assignments])))
+        
+        formatted_results = []
+        shifts = ["Morning", "Afternoon"]
+        
+        # Group by date, shift, room — dynamically collect all Faculty_N and Staff_N roles
+        grouped = {}
+        for a in assignments:
+            key = (a['exam_date'], a['shift_name'], a['room_name'])
+            if key not in grouped:
+                grouped[key] = {'faculties': {}, 'staffs': {}}
+            
+            role = a['role']
+            if role.startswith('Faculty_'):
+                try:
+                    idx = int(role.split('_')[1]) - 1  # Faculty_1 -> index 0
+                    grouped[key]['faculties'][idx] = a['person_name']
+                except (ValueError, IndexError):
+                    pass
+            elif role.startswith('Staff_') or role == 'Staff':
+                try:
+                    idx = int(role.split('_')[1]) - 1 if '_' in role and role != 'Staff' else 0
+                    grouped[key]['staffs'][idx] = a['person_name']
+                except (ValueError, IndexError):
+                    grouped[key]['staffs'][0] = a['person_name']
+                
+        for (date_str, shift_name, room_name), roles in grouped.items():
+            # Convert dicts to sorted lists
+            fac_list = [roles['faculties'].get(i, '---') for i in range(max(roles['faculties'].keys(), default=-1) + 1)]
+            stf_list = [roles['staffs'].get(i, '---') for i in range(max(roles['staffs'].keys(), default=-1) + 1)]
+            formatted_results.append({
+                'date': date_str,
+                'shift': shift_name,
+                'room': room_name,
+                'faculties': fac_list,
+                'staffs': stf_list
+            })
+            
+        return jsonify({'success': True, 'results': formatted_results, 'dates': unique_dates})
+
+
+        
+    except Exception as e:
+        logger.error(f'❌ Failed to get routine: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/save_routine', methods=['POST'])
+def save_routine_api():
+    try:
+        data = request.json
+        results = data.get('results')
+        version_name = data.get('version_name')
+        
+        if not results:
+            return jsonify({'success': False, 'error': 'No schedule results to save'}), 400
+        if not version_name:
+            return jsonify({'success': False, 'error': 'Routine name is required'}), 400
+            
+        # Re-format results back to what save_schedule_to_db expects (it expects the raw dict)
+        # But wait, save_schedule_to_db expects "Faculty1", "Faculty2", "Staff", "Room", "Shift", "Date".
+        # The frontend currentScheduleResults already has "date", "shift", "room", "faculty1", "faculty2", "staff".
+        # Let's map it:
+        db_results = []
+        for r in results:
+            db_results.append({
+                "Date": r.get('date'),
+                "Shift": r.get('shift'),
+                "Room": r.get('room'),
+                "faculties": r.get('faculties', []),
+                "staffs": r.get('staffs', [])
+            })
+            
+        from service.db import save_schedule_to_db
+        schedule_id = save_schedule_to_db(version_name, db_results)
+        if schedule_id:
+            return jsonify({'success': True, 'message': 'Routine saved successfully', 'id': schedule_id})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save routine'}), 500
+            
+    except Exception as e:
+        logger.error(f'❌ Failed to save routine: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/routine/<int:schedule_id>', methods=['DELETE'])
+def delete_routine_api(schedule_id):
+    try:
+        from service.db import delete_schedule
+        if delete_schedule(schedule_id):
+            return jsonify({'success': True, 'message': 'Routine deleted successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to delete routine'}), 400
+    except Exception as e:
+        logger.error(f'❌ Failed to delete routine: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/routine/<int:schedule_id>', methods=['PUT'])
+def rename_routine_api(schedule_id):
+    try:
+        data = request.json
+        new_name = data.get('name')
+        if not new_name:
+            return jsonify({'success': False, 'error': 'New name is required'}), 400
+            
+        from service.db import rename_schedule
+        if rename_schedule(schedule_id, new_name):
+            return jsonify({'success': True, 'message': 'Routine renamed successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to rename routine'}), 400
+    except Exception as e:
+        logger.error(f'❌ Failed to rename routine: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/download-csv', methods=['POST'])
 def download_csv():
     """Generate and download grouped CSV files (main, teachers, staffs, rooms) with constant filenames"""
@@ -340,97 +607,95 @@ def download_csv():
         
         logger.info(f'📊 CSV generation started with {len(results)} schedule entries - Type: {csv_type}')
         
-        # Create main DataFrame
-        df = pd.DataFrame(results)
-        
-        # Determine which file to download
+        # Determine max faculty/staff counts (dynamic)
+        max_fac = max((len(r.get('faculties', r.get('faculty1') and [r['faculty1'], r.get('faculty2', '')] or [])) for r in results), default=2)
+        max_stf = max((len(r.get('staffs', r.get('staff') and [r['staff']] or [])) for r in results), default=1)
+        if max_fac == 0: max_fac = 2
+        if max_stf == 0: max_stf = 1
+
+        def get_fac(row, i):
+            facs = row.get('faculties')
+            if facs is not None: return facs[i] if i < len(facs) else '---'
+            if i == 0: return row.get('faculty1', '---')
+            if i == 1: return row.get('faculty2', '---')
+            return '---'
+
+        def get_stf(row, i):
+            stfs = row.get('staffs')
+            if stfs is not None: return stfs[i] if i < len(stfs) else '---'
+            if i == 0: return row.get('staff', '---')
+            return '---'
+
+        fac_col_names = [f'Faculty {i+1}' for i in range(max_fac)]
+        stf_col_names = [f'Staff {i+1}' for i in range(max_stf)]
+
         if csv_type == 'teacher':
             logger.info('📋 Generating teacher-grouped schedule')
-            # Group by faculty (faculty1 or faculty2)
             teacher_records = []
-            for _, row in df.iterrows():
-                if row['faculty1'] != 'N/A':
-                    teacher_records.append({
-                        'Teacher': row['faculty1'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Role': 'Faculty 1'
-                    })
-                if row['faculty2'] != 'N/A':
-                    teacher_records.append({
-                        'Teacher': row['faculty2'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Role': 'Faculty 2'
-                    })
-            teacher_df = pd.DataFrame(teacher_records)
-            teacher_df = teacher_df.sort_values(['Teacher', 'Date', 'Shift']).reset_index(drop=True)
-            output_df = teacher_df
+            for row in results:
+                facs = row.get('faculties') or [row.get('faculty1'), row.get('faculty2')]
+                for i, name in enumerate(facs):
+                    if name and name not in ('N/A', '---', None, ''):
+                        teacher_records.append({
+                            'Teacher': name, 'Date': row['date'],
+                            'Shift': row['shift'], 'Room': row['room'],
+                            'Role': f'Faculty {i+1}'
+                        })
+            output_df = pd.DataFrame(teacher_records).sort_values(['Teacher', 'Date', 'Shift']).reset_index(drop=True)
             filename = TEACHER_SCHEDULE_CSV
-            
+
         elif csv_type == 'staff':
             logger.info('📋 Generating staff-grouped schedule')
-            # Group by staff
             staff_records = []
-            for _, row in df.iterrows():
-                if row['staff'] != 'N/A':
-                    staff_records.append({
-                        'Staff': row['staff'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Faculty1': row['faculty1'],
-                        'Faculty2': row['faculty2']
-                    })
-            staff_df = pd.DataFrame(staff_records)
-            staff_df = staff_df.sort_values(['Staff', 'Date', 'Shift']).reset_index(drop=True)
-            output_df = staff_df
+            for row in results:
+                stfs = row.get('staffs') or [row.get('staff')]
+                for i, name in enumerate(stfs):
+                    if name and name not in ('N/A', '---', None, ''):
+                        rec = {'Staff': name, 'Date': row['date'], 'Shift': row['shift'], 'Room': row['room']}
+                        for fi in range(max_fac):
+                            rec[fac_col_names[fi]] = get_fac(row, fi)
+                        staff_records.append(rec)
+            output_df = pd.DataFrame(staff_records).sort_values(['Staff', 'Date', 'Shift']).reset_index(drop=True)
             filename = STAFF_SCHEDULE_CSV
-            
+
         elif csv_type == 'room':
             logger.info('📋 Generating room-grouped schedule')
-            # Group by room
-            room_df = df.sort_values(['room', 'date', 'shift']).reset_index(drop=True)
-            output_df = room_df
+            room_records = []
+            for row in results:
+                rec = {'Date': row['date'], 'Room': row['room'], 'Shift': row['shift']}
+                for i in range(max_fac): rec[fac_col_names[i]] = get_fac(row, i)
+                for i in range(max_stf): rec[stf_col_names[i]] = get_stf(row, i)
+                room_records.append(rec)
+            output_df = pd.DataFrame(room_records).sort_values(['Room', 'Date', 'Shift']).reset_index(drop=True)
             filename = ROOM_SCHEDULE_CSV
-            
+
         else:  # main
             logger.info('📋 Generating main schedule')
-            output_df = df
+            main_records = []
+            for row in results:
+                rec = {'Date': row['date'], 'Shift': row['shift'], 'Room': row['room']}
+                for i in range(max_fac): rec[fac_col_names[i]] = get_fac(row, i)
+                for i in range(max_stf): rec[stf_col_names[i]] = get_stf(row, i)
+                main_records.append(rec)
+            output_df = pd.DataFrame(main_records)
             filename = MAIN_SCHEDULE_CSV
-        
-        # Generate CSV string
+
         csv_string = output_df.to_csv(index=False)
-        
-        # Save to permanent storage with constant filename (will overwrite)
         filepath = os.path.join(SCHEDULE_STORAGE_DIR, filename)
         output_df.to_csv(filepath, index=False)
-        logger.info(f'✓ CSV file saved to permanent storage: {filepath}')
-        logger.info(f'📂 CSV contains {len(output_df)} rows with columns: {list(output_df.columns)}')
-        
-        # Create CSV file in memory for download
+        logger.info(f'✓ CSV saved: {filepath} ({len(output_df)} rows)')
+
         output = BytesIO()
         output.write(csv_string.encode('utf-8'))
         output.seek(0)
-        
-        print(f'\n✓ CSV FILE GENERATED OK - {filename}\n')
-        logger.info(f'✓ CSV file generated and ready for download: {filename}')
-        
-        return send_file(
-            output,
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=filename
-        )
-    
+
+        return send_file(output, mimetype='text/csv', as_attachment=True, download_name=filename)
+
     except Exception as e:
         logger.error(f'❌ CSV generation failed: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 
 @app.route('/api/download-all-csv', methods=['POST'])
 def download_all_csv():
@@ -443,84 +708,83 @@ def download_all_csv():
         
         logger.info(f'📦 Creating ZIP with all grouped schedules')
         
-        # Create main DataFrame
-        df = pd.DataFrame(results)
-        
-        # Create ZIP in memory
+        # Determine max faculty/staff counts (dynamic)
+        max_fac = max((len(r.get('faculties') or [r.get('faculty1'), r.get('faculty2')] or []) for r in results), default=2)
+        max_stf = max((len(r.get('staffs') or [r.get('staff')] or []) for r in results), default=1)
+        if max_fac == 0: max_fac = 2
+        if max_stf == 0: max_stf = 1
+
+        def get_fac(row, i):
+            facs = row.get('faculties')
+            if facs is not None: return facs[i] if i < len(facs) else '---'
+            if i == 0: return row.get('faculty1', '---')
+            if i == 1: return row.get('faculty2', '---')
+            return '---'
+
+        def get_stf(row, i):
+            stfs = row.get('staffs')
+            if stfs is not None: return stfs[i] if i < len(stfs) else '---'
+            if i == 0: return row.get('staff', '---')
+            return '---'
+
+        fac_col_names = [f'Faculty {i+1}' for i in range(max_fac)]
+        stf_col_names = [f'Staff {i+1}' for i in range(max_stf)]
+
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Add main schedule
-            csv_string = df.to_csv(index=False)
-            zip_file.writestr(MAIN_SCHEDULE_CSV, csv_string)
+            # Main schedule
+            main_records = []
+            for row in results:
+                rec = {'Date': row['date'], 'Shift': row['shift'], 'Room': row['room']}
+                for i in range(max_fac): rec[fac_col_names[i]] = get_fac(row, i)
+                for i in range(max_stf): rec[stf_col_names[i]] = get_stf(row, i)
+                main_records.append(rec)
+            zip_file.writestr(MAIN_SCHEDULE_CSV, pd.DataFrame(main_records).to_csv(index=False))
             logger.info(f'✓ Added {MAIN_SCHEDULE_CSV} to ZIP')
-            
-            # Add teacher schedule
+
+            # Teacher schedule
             teacher_records = []
-            for _, row in df.iterrows():
-                if row['faculty1'] != 'N/A':
-                    teacher_records.append({
-                        'Teacher': row['faculty1'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Role': 'Faculty 1'
-                    })
-                if row['faculty2'] != 'N/A':
-                    teacher_records.append({
-                        'Teacher': row['faculty2'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Role': 'Faculty 2'
-                    })
-            teacher_df = pd.DataFrame(teacher_records)
-            teacher_df = teacher_df.sort_values(['Teacher', 'Date', 'Shift']).reset_index(drop=True)
-            csv_string = teacher_df.to_csv(index=False)
-            zip_file.writestr(TEACHER_SCHEDULE_CSV, csv_string)
+            for row in results:
+                facs = row.get('faculties') or [row.get('faculty1'), row.get('faculty2')]
+                for i, name in enumerate(facs):
+                    if name and name not in ('N/A', '---', None, ''):
+                        teacher_records.append({'Teacher': name, 'Date': row['date'], 'Shift': row['shift'], 'Room': row['room'], 'Role': f'Faculty {i+1}'})
+            teacher_df = pd.DataFrame(teacher_records).sort_values(['Teacher', 'Date', 'Shift']).reset_index(drop=True) if teacher_records else pd.DataFrame(columns=['Teacher','Date','Shift','Room','Role'])
+            zip_file.writestr(TEACHER_SCHEDULE_CSV, teacher_df.to_csv(index=False))
             logger.info(f'✓ Added {TEACHER_SCHEDULE_CSV} to ZIP')
-            
-            # Add staff schedule
+
+            # Staff schedule
             staff_records = []
-            for _, row in df.iterrows():
-                if row['staff'] != 'N/A':
-                    staff_records.append({
-                        'Staff': row['staff'],
-                        'Date': row['date'],
-                        'Shift': row['shift'],
-                        'Room': row['room'],
-                        'Faculty1': row['faculty1'],
-                        'Faculty2': row['faculty2']
-                    })
-            staff_df = pd.DataFrame(staff_records)
-            staff_df = staff_df.sort_values(['Staff', 'Date', 'Shift']).reset_index(drop=True)
-            csv_string = staff_df.to_csv(index=False)
-            zip_file.writestr(STAFF_SCHEDULE_CSV, csv_string)
+            for row in results:
+                stfs = row.get('staffs') or [row.get('staff')]
+                for i, name in enumerate(stfs):
+                    if name and name not in ('N/A', '---', None, ''):
+                        rec = {'Staff': name, 'Date': row['date'], 'Shift': row['shift'], 'Room': row['room']}
+                        for fi in range(max_fac): rec[fac_col_names[fi]] = get_fac(row, fi)
+                        staff_records.append(rec)
+            staff_df = pd.DataFrame(staff_records).sort_values(['Staff', 'Date', 'Shift']).reset_index(drop=True) if staff_records else pd.DataFrame()
+            zip_file.writestr(STAFF_SCHEDULE_CSV, staff_df.to_csv(index=False))
             logger.info(f'✓ Added {STAFF_SCHEDULE_CSV} to ZIP')
-            
-            # Add room schedule
-            room_df = df.sort_values(['room', 'date', 'shift']).reset_index(drop=True)
-            csv_string = room_df.to_csv(index=False)
-            zip_file.writestr(ROOM_SCHEDULE_CSV, csv_string)
+
+            # Room schedule
+            room_records = []
+            for row in results:
+                rec = {'Date': row['date'], 'Room': row['room'], 'Shift': row['shift']}
+                for i in range(max_fac): rec[fac_col_names[i]] = get_fac(row, i)
+                for i in range(max_stf): rec[stf_col_names[i]] = get_stf(row, i)
+                room_records.append(rec)
+            zip_file.writestr(ROOM_SCHEDULE_CSV, pd.DataFrame(room_records).sort_values(['Room', 'Date', 'Shift']).reset_index(drop=True).to_csv(index=False))
             logger.info(f'✓ Added {ROOM_SCHEDULE_CSV} to ZIP')
         
         zip_buffer.seek(0)
-        
-        print(f'\n✓ ZIP FILE GENERATED OK - All schedules included\n')
         logger.info(f'✓ ZIP file generated with all schedules')
         
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name='exam_schedules.zip'
-        )
+        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='exam_schedules.zip')
     
     except Exception as e:
         logger.error(f'❌ ZIP generation failed: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 
 @app.route('/api/download-pdf', methods=['POST'])
 def download_pdf():

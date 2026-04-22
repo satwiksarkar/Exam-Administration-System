@@ -497,31 +497,25 @@ def create_personnel_report_pdf(csv_file_path, pdf_output_path, is_staff=False):
             s_idx = headers.index('Shift')
             r_idx = headers.index('Room')
             
-            p_idx = -1
-            if is_staff and 'Staff' in headers:
-                p_idx = headers.index('Staff')
-            elif not is_staff and 'Teacher' in headers:
-                p_idx = headers.index('Teacher')
-                
-            has_person_col = (p_idx != -1)
-            
-            if not has_person_col and not is_staff:
-                role_idx = headers.index('Role')
-                f1_idx = headers.index('Faculty1')
-                f2_idx = headers.index('Faculty2')
+            # Faculty CSV now has 'Teacher' column; Staff CSV has 'Staff' column
+            p_col = 'Staff' if is_staff else 'Teacher'
+            if p_col not in headers:
+                # Fallback: try the old Faculty1 column for legacy CSVs
+                if not is_staff and 'Faculty1' in headers:
+                    p_col = 'Faculty1'
+                elif is_staff and 'Staff1' in headers:
+                    p_col = 'Staff1'
+                else:
+                    logger.error(f"❌ Column '{p_col}' not found in CSV headers: {headers}")
+                    return None
+            p_idx = headers.index(p_col)
         except ValueError as e:
             logger.error(f"❌ Missing expected column in CSV: {str(e)}")
             return None
             
         personnel_map = {}
         for row in data:
-            if has_person_col:
-                person = row[p_idx]
-            elif not is_staff and not has_person_col:
-                role = row[role_idx]
-                person = row[f1_idx] if role == 'Faculty1' else row[f2_idx]
-            else:
-                person = None
+            person = row[p_idx] if p_idx < len(row) else None
                 
             if not person or person == 'N/A' or person == '---':
                 continue

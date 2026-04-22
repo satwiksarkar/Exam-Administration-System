@@ -31,7 +31,7 @@ if not logger.handlers:
 sys.path.append(os.path.dirname(__file__))
 from db import read_teachers, read_staff, read_rooms
 
-def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, req_stf=1, two_shift_preferences=None):
+def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, req_stf=1, two_shift_preferences=None, locked_assignments=None, emergency_absence=None, emergency_date=None):
     if not ORTOOLS_AVAILABLE:
         return None
         
@@ -53,12 +53,39 @@ def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, re
                 for r in rooms:
                     x_stf[(s_id, d, s, r)] = model.NewBoolVar(f"S_{s_id}_{d}_{s}_{r}")
                     
+    # 0. Process past assignments first so we can adjust capacity
+    past_f = set()
+    past_s = set()
+    em_idx = dates.index(emergency_date) if emergency_date and emergency_date in dates else 999
+    
+    if locked_assignments:
+        for row in locked_assignments:
+            d = row['exam_date']
+            if d in dates:
+                d_idx = dates.index(d)
+                if d_idx < em_idx:
+                    s = row['shift_name']
+                    r = row['room_name']
+                    p = row['person_name']
+                    if row['role'].startswith('Faculty'):
+                        past_f.add((p, d, s, r))
+                    else:
+                        past_s.add((p, d, s, r))
+
     # 1. Capacity per room
     for d in dates:
+        d_idx = dates.index(d)
+        is_past = (locked_assignments is not None) and (d_idx < em_idx)
         for s in shifts:
             for r in rooms:
-                model.Add(sum(x_fac[(f_id, d, s, r)] for f_id in faculties) == req_fac)
-                model.Add(sum(x_stf[(s_id, d, s, r)] for s_id in staffData) == req_stf)
+                if is_past:
+                    past_f_count = sum(1 for (f_p, d_p, s_p, r_p) in past_f if d_p == d and s_p == s and r_p == r)
+                    past_s_count = sum(1 for (s_p, d_p, s_p2, r_p) in past_s if d_p == d and s_p2 == s and r_p == r)
+                    model.Add(sum(x_fac[(f_id, d, s, r)] for f_id in faculties) == past_f_count)
+                    model.Add(sum(x_stf[(s_id, d, s, r)] for s_id in staffData) == past_s_count)
+                else:
+                    model.Add(sum(x_fac[(f_id, d, s, r)] for f_id in faculties) == req_fac)
+                    model.Add(sum(x_stf[(s_id, d, s, r)] for s_id in staffData) == req_stf)
 
     # 2. At most 1 room per person per shift
     for f_id in faculties:
@@ -90,6 +117,35 @@ def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, re
                     for r in rooms:
                         model.Add(x_stf[(s_id, d, s, r)] == 0)
 
+    # 3.5 Dynamic Rescheduling constraints
+    if locked_assignments:
+        for d in dates:
+            if dates.index(d) < em_idx:
+                for s in shifts:
+                    for r in rooms:
+                        for f_id in faculties:
+                            if (f_id, d, s, r) in past_f:
+                                model.Add(x_fac[(f_id, d, s, r)] == 1)
+                            else:
+                                model.Add(x_fac[(f_id, d, s, r)] == 0)
+                        for s_id in staffData:
+                            if (s_id, d, s, r) in past_s:
+                                model.Add(x_stf[(s_id, d, s, r)] == 1)
+                            else:
+                                model.Add(x_stf[(s_id, d, s, r)] == 0)
+
+    if emergency_absence and emergency_date:
+        em_idx = dates.index(emergency_date) if emergency_date in dates else 999
+        for d in dates:
+            if dates.index(d) >= em_idx:
+                for s in shifts:
+                    for r in rooms:
+                        if emergency_absence in faculties:
+                            model.Add(x_fac[(emergency_absence, d, s, r)] == 0)
+                        if emergency_absence in staffData:
+                            model.Add(x_stf[(emergency_absence, d, s, r)] == 0)
+
+
     # Calculate individual workloads
     workload_fac = {}
     for f_id in faculties:
@@ -107,16 +163,18 @@ def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, re
     
     if faculties:
         for f_id in faculties:
-            model.Add(workload_fac[f_id] <= max_fac_workload)
-            model.Add(workload_fac[f_id] >= min_fac_workload)
+            if f_id != emergency_absence:
+                model.Add(workload_fac[f_id] <= max_fac_workload)
+                model.Add(workload_fac[f_id] >= min_fac_workload)
     else:
         model.Add(max_fac_workload == 0)
         model.Add(min_fac_workload == 0)
         
     if staffData:
         for s_id in staffData:
-            model.Add(workload_stf[s_id] <= max_stf_workload)
-            model.Add(workload_stf[s_id] >= min_stf_workload)
+            if s_id != emergency_absence:
+                model.Add(workload_stf[s_id] <= max_stf_workload)
+                model.Add(workload_stf[s_id] >= min_stf_workload)
     else:
         model.Add(max_stf_workload == 0)
         model.Add(min_stf_workload == 0)
@@ -217,16 +275,15 @@ def solve_with_ortools(dates, rooms, shifts, faculties, staffData, req_fac=2, re
                             
                     results.append({
                         "Date": d, "Shift": s, "Room": r,
-                        "Faculty_1": assigned_f[0] if len(assigned_f) > 0 else "---",
-                        "Faculty_2": assigned_f[1] if len(assigned_f) > 1 else "---",
-                        "Staff": assigned_s[0] if len(assigned_s) > 0 else "---"
+                        "faculties": assigned_f,
+                        "staffs": assigned_s
                     })
         total_req = len(dates) * len(shifts) * len(rooms) * (req_fac + req_stf)
         return {"results": results, "flow": total_req, "total": total_req}
     else:
         return None
 
-def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_shift_preferences=None):
+def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_shift_preferences=None, locked_assignments=None, emergency_absence=None, emergency_date=None, req_fac=2, req_stf=1):
     try:
         logger.info("🔶 Starting formal_scheduler_api")
         logger.info(f"📅 Exam dates received: {len(dates)} dates - {dates}")
@@ -290,11 +347,11 @@ def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_sh
                     
                     logger.info(f"  ✓ {person} on {d} ({pref_shift}): {status}")
 
-        total_req = len(dates) * len(shifts) * len(rooms) * 3  # 2 teachers + 1 staff
+        total_req = len(dates) * len(shifts) * len(rooms) * (req_fac + req_stf)
         
         # --- SOLVING ---
         logger.info("\n[STATUS] Computational Engine Active. Optimizing deployment...")
-        cp_solution = solve_with_ortools(dates, rooms, shifts, facultyData, staffData, two_shift_preferences=two_shift_preferences)
+        cp_solution = solve_with_ortools(dates, rooms, shifts, facultyData, staffData, req_fac=req_fac, req_stf=req_stf, two_shift_preferences=two_shift_preferences, locked_assignments=locked_assignments, emergency_absence=emergency_absence, emergency_date=emergency_date)
         
         if cp_solution:
             logger.info("[OR-TOOLS] Solved with advanced constraint programming for gaps and workload management!")
@@ -347,8 +404,8 @@ def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_sh
             for d in dates:
                 for s in shifts:
                     for r in rooms:
-                        G.add_edge(f"F_REQ_{d}_{s}_{r}", sink, capacity=2, weight=0)
-                        G.add_edge(f"S_REQ_{d}_{s}_{r}", sink, capacity=1, weight=0)
+                        G.add_edge(f"F_REQ_{d}_{s}_{r}", sink, capacity=req_fac, weight=0)
+                        G.add_edge(f"S_REQ_{d}_{s}_{r}", sink, capacity=req_stf, weight=0)
                         
             try:
                 flow_dict = nx.max_flow_min_cost(G, source, sink)
@@ -378,9 +435,8 @@ def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_sh
                         
                         raw_results.append({
                             "Date": d, "Shift": s, "Room": r,
-                            "Faculty_1": assigned_f[0] if len(assigned_f) > 0 else "---",
-                            "Faculty_2": assigned_f[1] if len(assigned_f) > 1 else "---",
-                            "Staff": assigned_s[0] if len(assigned_s) > 0 else "---"
+                            "faculties": assigned_f,
+                            "staffs": assigned_s
                         })
                         
         empty_positions = 0
@@ -391,28 +447,22 @@ def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_sh
             s = item["Shift"]
             r = item["Room"]
             
-            f1_name = item["Faculty_1"]
-            f2_name = item["Faculty_2"]
-            s_name = item["Staff"]
+            assigned_f = item.get("faculties", [])
+            assigned_s = item.get("staffs", [])
             
-            if f1_name == "---" and f2_name == "---" and s_name == "---":
-                empty_positions += 3
-            else:
-                f1_idx = teachers.index(f1_name) if f1_name in teachers else -1
-                f2_idx = teachers.index(f2_name) if f2_name in teachers else -1
-                s_idx = staff.index(s_name) if s_name in staff else -1
-                
-                final_results.append({
-                    'date': dates.index(d),
-                    'shift': shifts.index(s),
-                    'room': rooms.index(r),
-                    'faculty1': f1_idx,
-                    'faculty2': f2_idx,
-                    'staff': s_idx
-                })
-                if f1_name == "---": empty_positions += 1
-                if f2_name == "---": empty_positions += 1
-                if s_name == "---": empty_positions += 1
+            empty_positions += max(0, req_fac - len(assigned_f))
+            empty_positions += max(0, req_stf - len(assigned_s))
+            
+            f_indices = [teachers.index(f) if f in teachers else -1 for f in assigned_f]
+            s_indices = [staff.index(st) if st in staff else -1 for st in assigned_s]
+            
+            final_results.append({
+                'date': dates.index(d),
+                'shift': shifts.index(s),
+                'room': rooms.index(r),
+                'faculties': f_indices,
+                'staffs': s_indices
+            })
         
         status_msg = f'Schedule generated with {empty_positions} empty positions out of {total_req} total slots'
         if empty_positions == 0:
@@ -431,7 +481,7 @@ def formal_scheduler_api(teachers, staff, rooms, dates, preferences=None, two_sh
         logger.error(f"❌ Exception in formal_scheduler_api: {str(e)}")
         return [], {'message': f'Error: {str(e)}', 'empty_positions': 0, 'total_positions': 0}
 
-def display_schedule(results, teachers, staff, rooms, dates):
+def display_schedule(results, teachers, staff, rooms, dates, version_name=None):
     shifts = ["Morning", "Afternoon"]
     
     logger.info("━" * 80)
@@ -442,39 +492,52 @@ def display_schedule(results, teachers, staff, rooms, dates):
     print("="*110)
 
     csv_data = []
-
-    print(f"{'Date':<15} | {'Room':<15} | {'Shift':<12} | {'Faculty1':<20} | {'Faculty2':<20} | {'Staff':<20}")
+    
+    # Determine req_fac and req_stf from the first result
+    req_fac = 2
+    req_stf = 1
+    if results:
+        first = results[0]
+        req_fac = len(first.get('faculties', [1, 2]))  # fallback to 2
+        req_stf = len(first.get('staffs', [1]))         # fallback to 1
+    
+    fac_cols = [f'Faculty{i+1}' for i in range(req_fac)]
+    stf_cols = [f'Staff{i+1}' for i in range(req_stf)]
+    header_cols = ['Date', 'Room', 'Shift'] + fac_cols + stf_cols
+    
+    col_header = ' | '.join(f"{h:<20}" for h in header_cols)
+    print(col_header)
     print("-" * 110)
 
     for date_idx, date in enumerate(dates):
         for room_idx, room in enumerate(rooms):
             for shift_idx, shift_name in enumerate(shifts):
-                f1_name = ""
-                f2_name = ""
-                s_name = ""
+                fac_names = [''] * req_fac
+                stf_names = [''] * req_stf
                 
                 for r in results:
                     if r['date'] == date_idx and r['room'] == room_idx and r['shift'] == shift_idx:
-                        if r['faculty1'] >= 0: f1_name = teachers[r['faculty1']]
-                        if r['faculty2'] >= 0: f2_name = teachers[r['faculty2']]
-                        if r['staff'] >= 0: s_name = staff[r['staff']]
+                        fac_idxs = r.get('faculties', [])
+                        stf_idxs = r.get('staffs', [])
+                        for i, fi in enumerate(fac_idxs):
+                            if i < req_fac and 0 <= fi < len(teachers):
+                                fac_names[i] = teachers[fi]
+                        for i, si in enumerate(stf_idxs):
+                            if i < req_stf and 0 <= si < len(staff):
+                                stf_names[i] = staff[si]
                         break
                 
-                # Only log rooms/shifts that actually have assignments or we could log empty too
-                # Usually we want to print all slots so the schedule is complete
-                row = {
-                    'Date': date,
-                    'Room': room,
-                    'Shift': shift_name,
-                    'Faculty1': f1_name,
-                    'Faculty2': f2_name,
-                    'Staff': s_name
-                }
+                row = {'Date': date, 'Room': room, 'Shift': shift_name}
+                for i, col in enumerate(fac_cols):
+                    row[col] = fac_names[i]
+                for i, col in enumerate(stf_cols):
+                    row[col] = stf_names[i]
+                
                 csv_data.append(row)
-                print(f"{row['Date']:<15} | {row['Room']:<15} | {row['Shift']:<12} | {row['Faculty1']:<20} | {row['Faculty2']:<20} | {row['Staff']:<20}")
+                row_str = ' | '.join(f"{str(row.get(h,'')):<20}" for h in header_cols)
+                print(row_str)
 
     print("="*110)
-    
     if csv_data:
         df = pd.DataFrame(csv_data)
         
@@ -487,36 +550,42 @@ def display_schedule(results, teachers, staff, rooms, dates):
         df.to_csv(main_csv_path, index=False)
         logger.info(f"✓ Main schedule saved: {main_csv_path}")
         
-        # Generate Teacher Schedule (grouped by Faculty1 and Faculty2)
-        if 'Faculty1' in df.columns:
-            teacher_data = []
-            for teacher in teachers:
-                teacher_rows = df[(df['Faculty1'] == teacher) | (df['Faculty2'] == teacher)].copy()
-                teacher_rows['Role'] = teacher_rows.apply(
-                    lambda row: 'Faculty1' if row['Faculty1'] == teacher else 'Faculty2',
-                    axis=1
-                )
-                teacher_data.append(teacher_rows)
-            
-            if teacher_data:
-                teacher_df = pd.concat(teacher_data, ignore_index=True)
-                teacher_schedule_path = os.path.join(schedule_storage, TEACHER_SCHEDULE_CSV)
-                teacher_df.to_csv(teacher_schedule_path, index=False)
-                logger.info(f"✓ Teacher schedule saved: {teacher_schedule_path}")
+        # Generate Teacher Schedule: one row per person per assignment
+        teacher_rows_list = []
+        for col in fac_cols:
+            if col in df.columns:
+                for _, row in df.iterrows():
+                    person = row[col]
+                    if person and person != '':
+                        teacher_rows_list.append({
+                            'Date': row['Date'], 'Shift': row['Shift'], 'Room': row['Room'],
+                            'Teacher': person, 'Role': col
+                        })
+        if teacher_rows_list:
+            teacher_df = pd.DataFrame(teacher_rows_list)
+            teacher_schedule_path = os.path.join(schedule_storage, TEACHER_SCHEDULE_CSV)
+            teacher_df.to_csv(teacher_schedule_path, index=False)
+            logger.info(f"✓ Teacher schedule saved: {teacher_schedule_path}")
         
-        # Generate Staff Schedule (grouped by Staff column)
-        if 'Staff' in df.columns:
-            staff_df = df[df['Staff'] != ''].copy()
-            staff_groupby = staff_df.groupby('Staff')
-            
+        # Generate Staff Schedule: one row per staff per assignment
+        staff_rows_list = []
+        for col in stf_cols:
+            if col in df.columns:
+                for _, row in df.iterrows():
+                    person = row[col]
+                    if person and person != '':
+                        staff_rows_list.append({
+                            'Date': row['Date'], 'Shift': row['Shift'], 'Room': row['Room'],
+                            'Staff': person, 'Role': col
+                        })
+        if staff_rows_list:
+            staff_df = pd.DataFrame(staff_rows_list)
             staff_schedule_path = os.path.join(schedule_storage, STAFF_SCHEDULE_CSV)
             staff_df.to_csv(staff_schedule_path, index=False)
             logger.info(f"✓ Staff schedule saved: {staff_schedule_path}")
         
-        # Generate Room Schedule (grouped by Room)
+        # Generate Room Schedule (full table grouped by Room)
         if 'Room' in df.columns:
-            room_groupby = df.groupby('Room')
-            
             room_schedule_path = os.path.join(schedule_storage, ROOM_SCHEDULE_CSV)
             df.to_csv(room_schedule_path, index=False)
             logger.info(f"✓ Room schedule saved: {room_schedule_path}")

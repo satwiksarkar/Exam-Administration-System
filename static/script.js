@@ -3,6 +3,7 @@ let selectedPreferences = [];
 let twoShiftPreferences = [];  // NEW: Store 2-shift preferences
 let teacherList = [];
 let staffList = [];
+let loadedScheduleId = null; // Track the currently loaded routine
 
 // Calendar variables
 let selectedDates = [];
@@ -16,6 +17,7 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 document.addEventListener('DOMContentLoaded', function() {
     renderCalendar();
     populateYearSelect();
+    loadRoutines();
 });
 
 async function loadTeacherData() {
@@ -32,6 +34,152 @@ async function loadTeacherData() {
         }
     } catch (error) {
         console.error('Failed to load teacher data:', error);
+    }
+}
+
+function toggleSavedRoutines() {
+    const panel = document.getElementById('savedRoutinesPanel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        loadRoutines();
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+async function loadRoutines() {
+    const list = document.getElementById('routinesList');
+    try {
+        const response = await fetch('/api/routines');
+        const data = await response.json();
+        
+        if (data.success && data.routines && data.routines.length > 0) {
+            let html = '';
+            data.routines.forEach(routine => {
+                const dateObj = new Date(routine.created_at);
+                const options = {
+                    timeZone: 'Asia/Kolkata',
+                    day: 'numeric', month: 'short', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: true
+                };
+                const dateStr = dateObj.toLocaleString('en-IN', options);
+                const safeName = routine.version_name.replace(/'/g, "\\'");
+                html += `
+                    <div class="routine-item" id="routine-${routine.id}" onclick="restoreRoutine(${routine.id}, '${safeName}')">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <div class="routine-name">${routine.version_name}</div>
+                                <div class="routine-date">${dateStr}</div>
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                <button onclick="renameRoutine(event, ${routine.id}, '${safeName}')" class="btn btn-secondary" title="Rename" style="padding: 2px 5px; font-size: 0.7rem;">✏️</button>
+                                <button onclick="deleteRoutine(event, ${routine.id})" class="btn btn-warning" title="Delete" style="padding: 2px 5px; font-size: 0.7rem; background: rgba(231, 76, 60, 0.7); border: none; color: white;">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            list.innerHTML = html;
+        } else {
+            list.innerHTML = '<p class="no-dates" style="width: 100%;">No routines saved yet.</p>';
+        }
+    } catch (error) {
+        console.error('Failed to load routines:', error);
+        list.innerHTML = '<p class="no-dates" style="width: 100%;">Failed to load routines.</p>';
+    }
+}
+
+async function deleteRoutine(event, id) {
+    event.stopPropagation();
+    if (!confirm('Are you sure you want to delete this routine?')) return;
+
+    try {
+        const response = await fetch(`/api/routine/${id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+            loadRoutines();
+            if (loadedScheduleId === id) {
+                loadedScheduleId = null;
+                currentScheduleResults = [];
+                document.getElementById('resultsSection').style.display = 'none';
+            }
+        } else {
+            alert('Failed to delete routine: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Failed to delete routine:', error);
+    }
+}
+
+async function renameRoutine(event, id, currentName) {
+    event.stopPropagation();
+    const newName = prompt('Enter new routine name:', currentName);
+    if (!newName || newName.trim() === '' || newName === currentName) return;
+
+    try {
+        const response = await fetch(`/api/routine/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: newName.trim() })
+        });
+        const data = await response.json();
+        if (data.success) {
+            loadRoutines();
+            // Optional: update the heading if this routine is currently loaded
+        } else {
+            alert('Failed to rename routine: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Failed to rename routine:', error);
+    }
+}
+
+async function restoreRoutine(id, name) {
+    document.getElementById('loadingSpinner').style.display = 'flex';
+    
+    // Highlight selected routine
+    document.querySelectorAll('.routine-item').forEach(item => item.classList.remove('active'));
+    const selectedItem = document.getElementById(`routine-${id}`);
+    if (selectedItem) selectedItem.classList.add('active');
+
+    try {
+        const response = await fetch(`/api/routine/${id}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            currentScheduleResults = data.results;
+            loadedScheduleId = id;
+            
+            // Reconstruct selected dates
+            selectedDates = data.dates;
+            updateSelectedDatesDisplay();
+            
+            // Re-render calendar so it highlights the restored dates
+            if (selectedDates.length > 0) {
+                const firstDate = new Date(selectedDates[0]);
+                currentMonth = firstDate.getMonth();
+                currentYear = firstDate.getFullYear();
+                document.getElementById("yearSelect").value = currentYear;
+            }
+            renderCalendar();
+            
+            // Display results table
+            displayResults(data.results, {message: `Restored Routine: ${name}`});
+            
+            // Show preference panel so they can access Emergency Reschedule
+            showPreferencePanel();
+            
+        } else {
+            showError(data.error);
+        }
+    } catch (error) {
+        showError('Failed to restore routine: ' + error.message);
+    } finally {
+        document.getElementById('loadingSpinner').style.display = 'none';
     }
 }
 
@@ -59,6 +207,17 @@ function updatePreferenceSelects() {
         twoShiftsSelect.innerHTML += `<option value="${teacher}">${teacher}</option>`;
     });
 
+    const emPersonSelect = document.getElementById('emergencyPersonSelect');
+    if (emPersonSelect) {
+        emPersonSelect.innerHTML = '<option value="">Select Absentee...</option>';
+        teacherList.forEach(teacher => {
+            emPersonSelect.innerHTML += `<option value="${teacher}">${teacher}</option>`;
+        });
+        staffList.forEach(staff => {
+            emPersonSelect.innerHTML += `<option value="${staff}">${staff}</option>`;
+        });
+    }
+
     dateSelect.innerHTML = '<option value="">Select date</option>';
     selectedDates.slice().sort().forEach(date => {
         dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
@@ -68,6 +227,14 @@ function updatePreferenceSelects() {
     selectedDates.slice().sort().forEach(date => {
         staffDateSelect.innerHTML += `<option value="${date}">${date}</option>`;
     });
+
+    const emDateSelect = document.getElementById('emergencyDateSelect');
+    if (emDateSelect) {
+        emDateSelect.innerHTML = '<option value="">Absence Effective From...</option>';
+        selectedDates.slice().sort().forEach(date => {
+            emDateSelect.innerHTML += `<option value="${date}">${date}</option>`;
+        });
+    }
 }
 
 function showPreferencePanel() {
@@ -77,6 +244,13 @@ function showPreferencePanel() {
     }
     document.getElementById('uploadSection').style.display = 'none';
     document.getElementById('preferenceSection').style.display = 'block';
+    
+    // Only show Emergency Reschedule if a DB routine is currently loaded
+    const emSec = document.getElementById('emergencySection');
+    if (emSec) {
+        emSec.style.display = loadedScheduleId ? 'block' : 'none';
+    }
+    
     loadTeacherData().then(updatePreferenceSelects);
     updatePreferenceRulesList();
     updateTwoShiftsList();  // NEW: Update the two-shifts list
@@ -84,6 +258,8 @@ function showPreferencePanel() {
 
 function hidePreferencePanel() {
     document.getElementById('preferenceSection').style.display = 'none';
+    const emSec = document.getElementById('emergencySection');
+    if (emSec) emSec.style.display = 'none';
     document.getElementById('uploadSection').style.display = 'block';
 }
 
@@ -354,6 +530,14 @@ async function processSchedule() {
     document.getElementById('processBtn').disabled = true;
     document.getElementById('processBtn').innerText = 'Processing...';
 
+    const reqFac = parseInt(document.getElementById('reqFacInput').value) || 2;
+    const reqStf = parseInt(document.getElementById('reqStfInput').value) || 1;
+    
+    // This is a new schedule — clear any previously loaded DB routine
+    loadedScheduleId = null;
+    const emSec = document.getElementById('emergencySection');
+    if (emSec) emSec.style.display = 'none';
+
     try {
         const response = await fetch('/api/schedule', {
             method: 'POST',
@@ -363,7 +547,9 @@ async function processSchedule() {
             body: JSON.stringify({
                 exam_dates: selectedDates,
                 preferences: selectedPreferences,
-                two_shift_preferences: twoShiftPreferences  // NEW: Include 2-shift preferences
+                two_shift_preferences: twoShiftPreferences,
+                req_fac: reqFac,
+                req_stf: reqStf
             })
         });
 
@@ -372,6 +558,7 @@ async function processSchedule() {
         if (data.success) {
             currentScheduleResults = data.results;
             displayResults(data.results, data.status);
+            // Don't loadRoutines because we haven't saved it to DB yet
         } else {
             showError(data.error);
         }
@@ -384,21 +571,145 @@ async function processSchedule() {
     }
 }
 
+async function saveCurrentRoutine() {
+    if (!currentScheduleResults || currentScheduleResults.length === 0) {
+        alert('There is no schedule generated to save.');
+        return;
+    }
+    
+    const inputField = document.getElementById('saveRoutineNameInput');
+    const routineName = inputField.value.trim();
+    if (!routineName) {
+        alert('Please enter a name for this routine.');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/save_routine', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                results: currentScheduleResults,
+                version_name: routineName
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            alert('Routine saved successfully!');
+            inputField.value = '';
+            loadRoutines();
+        } else {
+            alert('Failed to save routine: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Failed to save routine:', error);
+        alert('Failed to save routine: ' + error.message);
+    }
+}
+
+async function triggerEmergencyReschedule() {
+    const person = document.getElementById('emergencyPersonSelect').value;
+    const date = document.getElementById('emergencyDateSelect').value;
+    
+    if (!person || !date) {
+        alert('Please select both the absentee and the effective date.');
+        return;
+    }
+    
+    if (!loadedScheduleId) {
+        alert('You must restore a routine first before you can run an Emergency Reschedule on it.');
+        return;
+    }
+    
+    if (!confirm(`This will read the selected schedule from the MySQL database, LOCK all assignments prior to ${date}, remove ${person} from all assignments on or after ${date}, and rebalance the rest. Proceed?`)) {
+        return;
+    }
+    
+    document.getElementById('loadingSpinner').style.display = 'flex';
+    
+    try {
+        const response = await fetch('/api/emergency_reschedule', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ person: person, emergency_date: date, schedule_id: loadedScheduleId })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            currentScheduleResults = data.results;
+            hidePreferencePanel();
+            displayResults(data.results, data.status);
+            alert("Emergency Database Reschedule Complete!\nThe past has been locked and the future has been re-optimized.");
+            loadRoutines(); // Refresh routines to show the newly saved emergency schedule
+        } else {
+            showError(data.error);
+        }
+    } catch (e) {
+        showError("Emergency reschedule request failed: " + e.message);
+    } finally {
+        document.getElementById('loadingSpinner').style.display = 'none';
+    }
+}
+
 // Display results in table
 function displayResults(results, status) {
+    const resultsHead = document.getElementById('resultsHead');
     const resultsBody = document.getElementById('resultsBody');
-    resultsBody.innerHTML = '';
+    
+    // Determine max faculties and staffs
+    let maxFac = 0;
+    let maxStf = 0;
+    if (results.length > 0) {
+        maxFac = results[0].faculties ? results[0].faculties.length : (results[0].faculty1 ? 2 : 0);
+        maxStf = results[0].staffs ? results[0].staffs.length : (results[0].staff ? 1 : 0);
+    }
+    
+    // Generate Header
+    let headHtml = `<tr>
+        <th>Date</th>
+        <th>Shift</th>
+        <th>Room</th>`;
+    for(let i=0; i<maxFac; i++) {
+        headHtml += `<th>Faculty ${i+1}</th>`;
+    }
+    for(let i=0; i<maxStf; i++) {
+        headHtml += `<th>Staff ${i+1}</th>`;
+    }
+    headHtml += `</tr>`;
+    resultsHead.innerHTML = headHtml;
 
+    resultsBody.innerHTML = '';
     results.forEach(row => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `
+        let html = `
             <td>${row.date}</td>
             <td>${row.shift}</td>
             <td>${row.room}</td>
-            <td>${row.faculty1}</td>
-            <td>${row.faculty2}</td>
-            <td>${row.staff}</td>
         `;
+        
+        if (row.faculties) {
+            for(let i=0; i<maxFac; i++) {
+                html += `<td>${row.faculties[i] || '---'}</td>`;
+            }
+            for(let i=0; i<maxStf; i++) {
+                html += `<td>${row.staffs[i] || '---'}</td>`;
+            }
+        } else {
+            // Fallback for legacy format
+            html += `
+                <td>${row.faculty1}</td>
+                <td>${row.faculty2}</td>
+                <td>${row.staff}</td>
+            `;
+        }
+        
+        tr.innerHTML = html;
         resultsBody.appendChild(tr);
     });
 
@@ -580,49 +891,79 @@ function viewAndDownloadSchedule(scheduleType) {
     let headers = [];
     let rows = [];
 
+    // Determine max faculty/staff counts across all rows
+    let maxFac = 0, maxStf = 0;
+    currentScheduleResults.forEach(row => {
+        maxFac = Math.max(maxFac, (row.faculties || []).length);
+        maxStf = Math.max(maxStf, (row.staffs || []).length);
+    });
+    if (maxFac === 0) maxFac = 2; // legacy fallback
+    if (maxStf === 0) maxStf = 1;
+
+    const facCols = Array.from({length: maxFac}, (_, i) => `Faculty ${i + 1}`);
+    const stfCols = Array.from({length: maxStf}, (_, i) => `Staff ${i + 1}`);
+
+    // Helper: get faculty/staff name at index from row (supports both formats)
+    const getFac = (row, i) => {
+        if (row.faculties) return row.faculties[i] || '---';
+        if (i === 0) return row.faculty1 || '---';
+        if (i === 1) return row.faculty2 || '---';
+        return '---';
+    };
+    const getStf = (row, i) => {
+        if (row.staffs) return row.staffs[i] || '---';
+        if (i === 0) return row.staff || '---';
+        return '---';
+    };
+
     if (scheduleType === 'room') {
-        headers = ['Date', 'Room', 'Shift', 'Faculty 1', 'Faculty 2', 'Staff'];
+        headers = ['Date', 'Room', 'Shift', ...facCols, ...stfCols];
         rows = currentScheduleResults.map(row => [
-            row.date, row.room, row.shift, row.faculty1, row.faculty2, row.staff
+            row.date, row.room, row.shift,
+            ...Array.from({length: maxFac}, (_, i) => getFac(row, i)),
+            ...Array.from({length: maxStf}, (_, i) => getStf(row, i))
         ]);
         rows.sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
-    } 
+    }
     else if (scheduleType === 'teacher') {
         headers = ['Teacher', 'Date', 'Shift', 'Room', 'Role'];
         const teacherMap = {};
-        
+
         currentScheduleResults.forEach(row => {
-            if (row.faculty1 !== 'N/A') {
-                if (!teacherMap[row.faculty1]) teacherMap[row.faculty1] = [];
-                teacherMap[row.faculty1].push([row.faculty1, row.date, row.shift, row.room, 'Faculty 1']);
-            }
-            if (row.faculty2 !== 'N/A') {
-                if (!teacherMap[row.faculty2]) teacherMap[row.faculty2] = [];
-                teacherMap[row.faculty2].push([row.faculty2, row.date, row.shift, row.room, 'Faculty 2']);
-            }
+            const facs = row.faculties || [row.faculty1, row.faculty2].filter(Boolean);
+            facs.forEach((name, i) => {
+                if (!name || name === 'N/A' || name === '---') return;
+                if (!teacherMap[name]) teacherMap[name] = [];
+                teacherMap[name].push([name, row.date, row.shift, row.room, `Faculty ${i + 1}`]);
+            });
         });
-        
+
         rows = Object.values(teacherMap).flat();
         rows.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
-    } 
+    }
     else if (scheduleType === 'staff') {
-        headers = ['Staff', 'Date', 'Shift', 'Room', 'Faculty 1', 'Faculty 2'];
+        headers = ['Staff', 'Date', 'Shift', 'Room', ...facCols];
         const staffMap = {};
-        
+
         currentScheduleResults.forEach(row => {
-            if (row.staff !== 'N/A') {
-                if (!staffMap[row.staff]) staffMap[row.staff] = [];
-                staffMap[row.staff].push([row.staff, row.date, row.shift, row.room, row.faculty1, row.faculty2]);
-            }
+            const stfs = row.staffs || [row.staff].filter(Boolean);
+            stfs.forEach((name, si) => {
+                if (!name || name === 'N/A' || name === '---') return;
+                if (!staffMap[name]) staffMap[name] = [];
+                const facNames = Array.from({length: maxFac}, (_, i) => getFac(row, i));
+                staffMap[name].push([name, row.date, row.shift, row.room, ...facNames]);
+            });
         });
-        
+
         rows = Object.values(staffMap).flat();
         rows.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
-    } 
+    }
     else { // main
-        headers = ['Date', 'Shift', 'Room', 'Faculty 1', 'Faculty 2', 'Staff'];
+        headers = ['Date', 'Shift', 'Room', ...facCols, ...stfCols];
         rows = currentScheduleResults.map(row => [
-            row.date, row.shift, row.room, row.faculty1, row.faculty2, row.staff
+            row.date, row.shift, row.room,
+            ...Array.from({length: maxFac}, (_, i) => getFac(row, i)),
+            ...Array.from({length: maxStf}, (_, i) => getStf(row, i))
         ]);
     }
 
@@ -635,22 +976,24 @@ function viewAndDownloadSchedule(scheduleType) {
         headerRow.appendChild(th);
     });
     tableHead.appendChild(headerRow);
-    
+
     // Update table body
     tableBody.innerHTML = '';
     rows.forEach(rowData => {
         const tr = document.createElement('tr');
         rowData.forEach(cell => {
             const td = document.createElement('td');
-            td.textContent = cell;
+            td.textContent = cell ?? '---';
             tr.appendChild(td);
         });
         tableBody.appendChild(tr);
     });
-    
+
     // Scroll to table
     resultsTable.scrollIntoView({ behavior: 'smooth' });
 }
+
+
 
 
 

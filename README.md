@@ -70,41 +70,88 @@ Exam Administration System/
 │   └── exam_schedules.zip          # Created on demand
 │
 ├── README.md                       # This file
-└── QUICK_START.md                  # Quick setup guide
+├── QUICK_START.md                  # Quick setup guide (merged into README)
+├── DEPLOYMENT.md                   # Cloud deployment guide
+└── render.yaml                     # Render deployment configuration
 ```
 
 ---
 
-## 🚀 Setup & Installation
+## 🚀 Quick Start
 
-### 1. Install Python Dependencies
+### Local Development
 
+#### 1. Install Python Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Run the Application
-
+#### 2. Run the Application
 ```bash
 python app.py
 ```
 
-The application will start at `http://localhost:5000`
-
-### 3. Access the Web Interface
-
-Open your browser and navigate to:
-
+You should see output like:
 ```
-http://localhost:5000
+ * Serving Flask app 'app'
+ * Debug mode: on
+ * Running on http://127.0.0.1:5000
 ```
 
-### Production Deployment
+#### 3. Open in Browser
+Navigate to: `http://localhost:5000`
 
+---
+
+## 🐳 Docker Deployment
+
+### Using Docker Compose
+```bash
+docker-compose up
+```
+Visit: `http://localhost:5000`
+
+### Using Docker Directly
+```bash
+# Pull from DockerHub
+docker pull satwik006/exam-administration-system:latest
+
+# Run the container
+docker run -p 5000:5000 satwik006/exam-administration-system:latest
+```
+
+### If Port 5000 is Already in Use
+```bash
+# Use a different port
+docker run -p 8080:5000 satwik006/exam-administration-system:latest
+# Visit: http://localhost:8080
+```
+
+### Export as .tar File
+```bash
+docker save exam-administration-system:latest -o exam-system.tar
+```
+
+To use the .tar file:
+```bash
+docker load -i exam-system.tar
+docker run -p 5000:5000 exam-administration-system:latest
+```
+
+---
+
+## 📦 Production Deployment
+
+### Local Server
 ```bash
 pip install gunicorn
 gunicorn -w 4 -b 0.0.0.0:5000 app:app
 ```
+
+### Cloud Deployment (Render)
+See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
+
+**Your DockerHub Repository:** https://hub.docker.com/r/satwik006/exam-administration-system
 
 ---
 
@@ -138,6 +185,49 @@ For each faculty/staff member:
 ### Step 5: Export Results
 - Download individual CSVs or all as ZIP
 - Generate PDF reports
+
+### Testing with Sample Data
+
+#### Example Configuration:
+- Faculty Members: 3 (F1, F2, F3)
+- Staff Members: 2 (S1, S2)
+- Rooms: 3 (R1, R2, R3)
+- Dates: 2 (D1, D2)
+
+#### Example Faculty Preferences:
+**F1**
+- Priority Dates: D1,D2
+- Exclusions: D1-Afternoon
+
+**F2**
+- Priority Dates: D2
+- Exclusions: D2-Morning
+
+**F3**
+- Priority Dates: D1
+- Exclusions: (leave empty)
+
+#### Example Staff Preferences:
+**S1**
+- Priority Dates: D1,D2
+- Exclusions: D2-Afternoon
+
+**S2**
+- Priority Dates: D2
+- Exclusions: D1-Morning
+
+---
+
+## ✨ Features Demonstrated
+
+✅ Dynamic form generation based on input numbers
+✅ Intelligent preference handling
+✅ Optimized schedule generation using network algorithms
+✅ Real-time results display in formatted table
+✅ Multi-format export (CSV, PDF, ZIP)
+✅ Calendar-based preference management
+✅ Responsive design for all devices
+✅ Error handling and validation
 
 ---
 
@@ -198,6 +288,125 @@ Returns: CSV file with constant name
 
 POST /api/download-all-csv
 Body: {"results": [...]}
+Returns: ZIP file with all 4 CSVs
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Port Already in Use
+**Error**: `Address already in use`
+
+**Solution 1 - Use Different Port**:
+```bash
+docker run -p 8080:5000 exam-administration-system:latest
+# Visit: http://localhost:8080
+```
+
+**Solution 2 - Find and Kill Process**:
+```bash
+# Find what's using port 5000
+netstat -ano | findstr :5000
+
+# Kill the process (replace PID with actual process ID)
+taskkill /PID <PID> /F
+```
+
+### Module Not Found Error
+**Error**: `ModuleNotFoundError`
+
+**Solution**: Reinstall dependencies
+```bash
+pip install -r requirements.txt --force-reinstall
+```
+
+### Excel/PDF Export Fails
+**Error**: Export functions not working
+
+**Solution**: Ensure required packages are installed
+```bash
+pip install openpyxl --upgrade
+pip install PyPDF2 --upgrade
+```
+
+### JavaScript Errors in Browser
+**Error**: Errors in browser console
+
+**Solution**:
+- Open browser console: `F12 → Console tab`
+- Check for specific errors
+- Clear browser cache: `Ctrl+Shift+Delete`
+- Refresh the page
+
+### Docker Image Not Found
+**Error**: `docker pull` fails
+
+**Solution**: Build image locally
+```bash
+docker build -t exam-administration-system .
+docker run -p 5000:5000 exam-administration-system:latest
+```
+
+---
+
+## 📋 API Endpoints Reference
+
+### Core Endpoints
+
+```
+POST /api/schedule
+POST /api/download-csv
+POST /api/download-all-csv
+POST /api/create-pdf
+GET  /api/data
+```
+
+### Full Request/Response Examples
+
+**POST /api/schedule** — Generate schedule
+```json
+{
+  "faculties_count": 3,
+  "staff_count": 2,
+  "rooms_count": 3,
+  "dates_count": 2,
+  "facultyData": {
+    "F1": {"priority_dates": ["D1"], "emergency_shifts": ["D1-Afternoon"]}
+  },
+  "staffData": {
+    "S1": {"priority_dates": ["D1"], "emergency_shifts": []}
+  }
+}
+```
+
+---
+
+## 🎓 Expected Results
+
+The system will:
+1. Create a bipartite graph of personnel, dates, shifts, and rooms
+2. Apply cost minimization algorithm for optimal assignment
+3. Display a complete deployment chart showing:
+   - Which faculty member is assigned to each room
+   - Which staff member supports each shift
+   - Any unfilled positions (if constraints don't allow 100% coverage)
+
+---
+
+## 📚 Additional Resources
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Cloud deployment guide
+- [CONFIG.py](CONFIG.py) - Configuration reference
+- [Dockerfile](Dockerfile) - Docker configuration
+
+---
+
+## 📝 License & Support
+
+For issues, feature requests, or contributions, please refer to the project repository.
+
+**DockerHub**: https://hub.docker.com/r/satwik006/exam-administration-system
 Returns: ZIP file with all 4 CSVs
 ```
 

@@ -437,6 +437,101 @@
             text-align: center;
         }
 
+        /* ── Saved Routines Panel ── */
+        .routines-panel {
+            background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 20px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 1.5rem;
+        }
+
+        .routines-panel h3 {
+            margin: 0 0 1rem 0;
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: #e0e0e0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 0.75rem;
+        }
+
+        .routines-list {
+            display: flex;
+            gap: 1rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .routines-list::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .routines-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .routines-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .routine-item {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 1rem;
+            min-width: 200px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .routine-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            border-color: #00c9a7;
+        }
+
+        .routine-item.active {
+            background: rgba(0, 201, 167, 0.2);
+            border-color: #00c9a7;
+        }
+
+        .routine-name {
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 0.25rem;
+        }
+
+        .routine-date {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+
+        .routine-input {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            margin-right: 1rem;
+            width: 250px;
+        }
+
+        .routine-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        #saveRoutineNameInput::placeholder {
+            color: #777777 !important;
+            font-weight: normal;
+        }
+
         @media (max-width: 768px) {
             .calendar-main-container {
                 flex-direction: column;
@@ -462,12 +557,21 @@
 
         <main>
             <!-- Navigation -->
-            <nav class="nav">
+            <nav class="nav" style="display: flex; justify-content: space-between;">
                 <a href="/register" class="nav-link">📝 Register Teachers/Staff/Rooms</a>
+                <button onclick="toggleSavedRoutines()" class="btn btn-secondary"
+                    style="padding: 10px 20px; font-size: 0.9rem;">📚 Saved Routines</button>
             </nav>
 
             <!-- Upload Section -->
             <section class="section" id="uploadSection">
+                <div class="routines-panel" id="savedRoutinesPanel" style="display: none;">
+                    <h3>📚 Saved Routines</h3>
+                    <div class="routines-list" id="routinesList">
+                        <p class="no-dates" style="width: 100%;">Loading routines...</p>
+                    </div>
+                </div>
+
                 <h2>Step 1: Select Exam Dates</h2>
                 <div class="calendar-main-container">
                     <div class="calendar-section">
@@ -508,6 +612,25 @@
                     </div>
                 </div>
                 <div class="generate-section">
+                    <div
+                        style="display: flex; justify-content: center; gap: 2rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                        <div
+                            style="background:rgba(25, 216, 216, 0.801); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                            <label
+                                style="color: #0a0101; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 0.95rem; margin-right: 10px;">👨‍🏫
+                                Faculty per Room:</label>
+                            <input type="number" id="reqFacInput" value="2" min="1" max="10"
+                                style="width: 60px; background: rgba(0,0,0,0.3); border: 1px solid #00c9a7; color: #fff; padding: 5px; border-radius: 4px; text-align: center; font-weight: bold;">
+                        </div>
+                        <div
+                            style="background: rgba(25, 216, 216, 0.801); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                            <label
+                                style="color: #131010; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 0.95rem; margin-right: 10px;">👥
+                                Staff per Room:</label>
+                            <input type="number" id="reqStfInput" value="1" min="0" max="10"
+                                style="width: 60px; background: rgba(0,0,0,0.3); border: 1px solid #00c9a7; color: #fff; padding: 5px; border-radius: 4px; text-align: center; font-weight: bold;">
+                        </div>
+                    </div>
                     <button onclick="processSchedule()" class="btn btn-primary" id="processBtn">🚀 Generate
                         Schedule</button>
                     <button onclick="showPreferencePanel()" class="btn btn-secondary" id="preferenceBtn"
@@ -582,9 +705,28 @@
                             <button class="btn btn-success" onclick="applyPreferences()">Apply Preferences</button>
                         </div>
                     </div>
-
                 </div>
             </section>
+
+            <!-- Emergency Reschedule Section -->
+            <section class="section" id="emergencySection" style="display: none; margin-top: 2rem;">
+                <div class="preference-panel" style="background: linear-gradient(145deg, #4a192c 0%, #2e0f17 100%);">
+                    <h3>🚨 Emergency Reschedule (MySQL Engine)</h3>
+                    <p style="color: #ccc; font-size: 0.9rem; margin-bottom: 1rem;">Locks the past schedule and
+                        intelligently re-distributes future shifts if someone drops out.</p>
+                    <div class="preference-row">
+                        <select id="emergencyPersonSelect">
+                            <option value="">Select Absentee...</option>
+                        </select>
+                        <select id="emergencyDateSelect">
+                            <option value="">Absence Effective From...</option>
+                        </select>
+                        <button class="btn btn-warning" style="grid-column: span 3;"
+                            onclick="triggerEmergencyReschedule()">🚨 Trigger Emergency Reschedule</button>
+                    </div>
+                </div>
+            </section>
+
 
             <!-- Faculty Section -->
             <section class="section" id="facultySection" style="display: none;">
@@ -613,19 +755,23 @@
                 <div class="status-message" id="statusMessage"></div>
                 <div class="table-wrapper">
                     <table id="resultsTable">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Shift</th>
-                                <th>Room</th>
-                                <th>Faculty 1</th>
-                                <th>Faculty 2</th>
-                                <th>Staff</th>
-                            </tr>
+                        <thead id="resultsHead">
+                            <!-- Dynamically generated by JS -->
                         </thead>
                         <tbody id="resultsBody">
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Database Save Section -->
+                <div
+                    style="margin-top: 1.5rem; margin-bottom: 1.5rem; padding: 1rem; background: rgba(0, 201, 167, 0.1); border: 1px solid rgba(0, 201, 167, 0.3); border-radius: 12px; display: flex; gap: 1rem; align-items: center; justify-content: center;">
+                    <input type="text" id="saveRoutineNameInput" class="routine-input"
+                        placeholder="Enter Routine Name to Save..."
+                        style="width: 300px; margin: 0; background: #ffffff !important; color: #000000 !important; border: 2px solid #00c9a7 !important; font-weight: bold;">
+                    <button onclick="saveCurrentRoutine()" class="btn btn-success"
+                        style="padding: 12px 24px; font-weight: bold; background: linear-gradient(135deg, #00c9a7, #00b894); border: none;">💾
+                        Save to Database</button>
                 </div>
 
                 <!-- Schedule Selection Buttons -->
