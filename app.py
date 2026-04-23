@@ -13,8 +13,10 @@ import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 
-# Explicitly set Tesseract path for Windows
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Set Tesseract path only on Windows; on Linux/Render it's available in PATH
+import platform
+if platform.system() == 'Windows':
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 
 # Setup logging with both file and console output
@@ -403,7 +405,7 @@ def emergency_reschedule():
         if not locked_assignments:
             return jsonify({'success': False, 'error': 'No prior schedule found in database for that ID.'}), 400
             
-        # Normalise exam_date: MySQL returns datetime.date objects; convert to plain "YYYY-MM-DD" strings
+        # Normalise exam_date: PostgreSQL might return datetime.date objects; convert to plain "YYYY-MM-DD" strings
         for row in locked_assignments:
             if hasattr(row['exam_date'], 'strftime'):
                 row['exam_date'] = row['exam_date'].strftime('%Y-%m-%d')
@@ -413,6 +415,25 @@ def emergency_reschedule():
         for row in locked_assignments:
             if row['exam_date'] not in dates_ordered:
                 dates_ordered.append(row['exam_date'])
+        
+        req_fac = 2
+        req_stf = 1
+        for row in locked_assignments:
+            role = row['role']
+            if role.startswith('Faculty_'):
+                try:
+                    idx = int(role.split('_')[1])
+                    if idx > req_fac:
+                        req_fac = idx
+                except (ValueError, IndexError):
+                    pass
+            elif role.startswith('Staff_'):
+                try:
+                    idx = int(role.split('_')[1])
+                    if idx > req_stf:
+                        req_stf = idx
+                except (ValueError, IndexError):
+                    pass
         
         teachers = read_teachers()
         staff = read_staff()
@@ -425,7 +446,9 @@ def emergency_reschedule():
             preferences=None, two_shift_preferences=None,
             locked_assignments=locked_assignments,
             emergency_absence=person,
-            emergency_date=em_date
+            emergency_date=em_date,
+            req_fac=req_fac,
+            req_stf=req_stf
         )
         
         formatted_results = []
@@ -458,10 +481,17 @@ def get_routines():
     try:
         from service.db import get_all_schedules
         routines = get_all_schedules()
-        for r in routines:
-            if 'created_at' in r and r['created_at']:
-                r['created_at'] = r['created_at'].strftime('%Y-%m-%dT%H:%M:%S')
-        return jsonify({'success': True, 'routines': routines})
+        # get_all_schedules already returns plain dicts.
+        # Normalize created_at: PostgreSQL returns datetime obj, SQLite returns string.
+        plain_routines = []
+        for row in routines:
+            if 'created_at' in row and row['created_at']:
+                ca = row['created_at']
+                if hasattr(ca, 'strftime'):
+                    row['created_at'] = ca.strftime('%Y-%m-%dT%H:%M:%S')
+                # SQLite already returns a string — leave it as-is
+            plain_routines.append(row)
+        return jsonify({'success': True, 'routines': plain_routines})
     except Exception as e:
         logger.error(f'❌ Failed to get routines: {str(e)}')
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -478,7 +508,7 @@ def get_routine(schedule_id):
         staff = read_staff()
         rooms = read_rooms()
         
-        # Normalise exam_date: MySQL returns datetime.date objects; convert to plain "YYYY-MM-DD" strings
+        # Normalise exam_date: PostgreSQL might return datetime.date objects; convert to plain "YYYY-MM-DD" strings
         for a in assignments:
             if hasattr(a['exam_date'], 'strftime'):
                 a['exam_date'] = a['exam_date'].strftime('%Y-%m-%d')
@@ -558,10 +588,7 @@ def save_routine_api():
             
         from service.db import save_schedule_to_db
         schedule_id = save_schedule_to_db(version_name, db_results)
-        if schedule_id:
-            return jsonify({'success': True, 'message': 'Routine saved successfully', 'id': schedule_id})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to save routine'}), 500
+        return jsonify({'success': True, 'message': 'Routine saved successfully', 'id': schedule_id})
             
     except Exception as e:
         logger.error(f'❌ Failed to save routine: {str(e)}')

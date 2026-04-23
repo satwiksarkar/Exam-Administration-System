@@ -184,17 +184,55 @@ def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
         story.append(Paragraph(title, title_style))
         story.append(Spacer(1, 0.3*inch))
         
-        # Calculate column widths
-        num_cols = len(headers)
-        col_width = (8 * inch) / num_cols  # Landscape width with margins
-        col_widths = [col_width] * num_cols
+        # Calculate proportional column widths
+        max_lengths = [len(str(h)) for h in headers]
+        for row in data:
+            for i, cell in enumerate(row):
+                if i < len(max_lengths):
+                    max_lengths[i] = max(max_lengths[i], len(str(cell)))
+                    
+        total_len = sum(max_lengths)
+        available_width = 10.0 * inch  # 11 inches landscape - 2 * 0.5 inch margins
         
-        # Create table
-        table = Table(table_data, colWidths=col_widths)
+        col_widths = []
+        for ml in max_lengths:
+            # allocate proportionally, but ensure a minimum width
+            cw = max(0.8 * inch, (ml / total_len) * available_width)
+            col_widths.append(cw)
+            
+        # normalize to exactly available_width
+        sum_cw = sum(col_widths)
+        if sum_cw > 0:
+            col_widths = [cw * (available_width / sum_cw) for cw in col_widths]
         
+        # Define Paragraph styles for text wrapping
+        header_pstyle = ParagraphStyle(
+            'HeaderP',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            textColor=colors.whitesmoke,
+            alignment=TA_CENTER
+        )
+        
+        data_pstyle = ParagraphStyle(
+            'DataP',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            alignment=TA_LEFT
+        )
+        
+        data_center_pstyle = ParagraphStyle(
+            'DataCenterP',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            alignment=TA_CENTER
+        )
+
         # Apply table styling
         table_style = [
-            # Header styling
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f497d')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -202,8 +240,6 @@ def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
             ('FONTSIZE', (0, 0), (-1, 0), 11),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('TOPPADDING', (0, 0), (-1, 0), 12),
-            
-            # Data row styling
             ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
@@ -211,16 +247,12 @@ def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
             ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
             ('LEFTPADDING', (0, 1), (-1, -1), 6),
             ('RIGHTPADDING', (0, 1), (-1, -1), 6),
-            
-            # Alternate row colors
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
-            
-            # Grid lines
             ('GRID', (0, 0), (-1, -1), 1, colors.grey),
             ('LINEABOVE', (0, 0), (-1, 0), 2, colors.HexColor('#1f497d')),
             ('LINEBELOW', (0, -1), (-1, -1), 2, colors.HexColor('#1f497d')),
         ]
-        
+
         # Apply vertical merges for specified column (merge cells with same values)
         current_row = 1  # Start after header
         while current_row < len(table_data):
@@ -243,8 +275,22 @@ def create_table_pdf(csv_file_path, pdf_output_path, grouping_column_name=None):
             else:
                 current_row += 1
         
-        # Rebuild table with merged data
-        table = Table(table_data, colWidths=col_widths)
+        # Convert text to Paragraphs for auto-wrapping
+        formatted_table_data = []
+        for r_idx, row in enumerate(table_data):
+            formatted_row = []
+            for c_idx, cell in enumerate(row):
+                if cell == "":
+                    formatted_row.append("")
+                elif r_idx == 0:
+                    formatted_row.append(Paragraph(str(cell), header_pstyle))
+                else:
+                    style = data_center_pstyle if c_idx == merge_column_index else data_pstyle
+                    formatted_row.append(Paragraph(str(cell), style))
+            formatted_table_data.append(formatted_row)
+        
+        # Rebuild table with merged and wrapped data
+        table = Table(formatted_table_data, colWidths=col_widths)
         table.setStyle(TableStyle(table_style))
         
         story.append(table)
@@ -374,17 +420,64 @@ def create_room_tables_pdf(csv_file_path, pdf_output_path):
         story.append(Paragraph(title, title_style))
         story.append(Spacer(1, 0.2*inch))
         
-        # Calculate column widths
+        # Calculate proportional column widths
         num_cols = len(headers)
-        col_width = (8 * inch) / num_cols
-        col_widths = [col_width] * num_cols
+        max_lengths = [len(str(h)) for h in headers]
+        for room_name in rooms_data:
+            for row in rooms_data[room_name]:
+                for i, cell in enumerate(row):
+                    if i < len(max_lengths):
+                        max_lengths[i] = max(max_lengths[i], len(str(cell)))
+                        
+        total_len = sum(max_lengths)
+        available_width = 10.0 * inch  # 11 inches landscape - 2 * 0.5 inch margins
+        
+        col_widths = []
+        for ml in max_lengths:
+            cw = max(0.8 * inch, (ml / total_len) * available_width)
+            col_widths.append(cw)
+            
+        sum_cw = sum(col_widths)
+        if sum_cw > 0:
+            col_widths = [cw * (available_width / sum_cw) for cw in col_widths]
+            
+        # Define Paragraph styles
+        header_pstyle = ParagraphStyle(
+            'HeaderP',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=10,
+            textColor=colors.whitesmoke,
+            alignment=TA_CENTER
+        )
+        
+        data_pstyle = ParagraphStyle(
+            'DataP',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=8,
+            alignment=TA_LEFT
+        )
         
         # Create table for each room
         for room_name in sorted(rooms_data.keys()):
             room_table_data = [headers] + rooms_data[room_name]
             
+            # Convert text to Paragraphs for auto-wrapping
+            formatted_table_data = []
+            for r_idx, row in enumerate(room_table_data):
+                formatted_row = []
+                for cell in row:
+                    if cell == "":
+                        formatted_row.append("")
+                    elif r_idx == 0:
+                        formatted_row.append(Paragraph(str(cell), header_pstyle))
+                    else:
+                        formatted_row.append(Paragraph(str(cell), data_pstyle))
+                formatted_table_data.append(formatted_row)
+            
             # Create table
-            table = Table(room_table_data, colWidths=col_widths)
+            table = Table(formatted_table_data, colWidths=col_widths)
             
             # Apply table styling
             table_style = [
@@ -596,13 +689,56 @@ def create_personnel_report_pdf(csv_file_path, pdf_output_path, is_staff=False):
             person_block.append(Paragraph(f"{label}: {person}", teacher_name_style))
             person_block.append(Paragraph(f"Total Assigned Duties: {len(assignments)}", duties_style))
             
-            # Build mini-table (Removed Role Column)
-            table_data = [["Date", "Shift", "Room"]]
+            # Calculate column widths based on max content length
+            # We have 7 inches of available width (8.5 - 1.5 margins)
+            available_width = 7.0 * inch
+            max_lengths = [4, 5, 4] # "Date", "Shift", "Room"
             for asn in assignments:
-                table_data.append([asn['date'], asn['shift'], asn['room']])
+                max_lengths[0] = max(max_lengths[0], len(str(asn['date'])))
+                max_lengths[1] = max(max_lengths[1], len(str(asn['shift'])))
+                max_lengths[2] = max(max_lengths[2], len(str(asn['room'])))
                 
-            col_widths = [2*inch, 2*inch, 2*inch]
-            t = Table(table_data, colWidths=col_widths)
+            total_len = sum(max_lengths)
+            col_widths = []
+            for ml in max_lengths:
+                cw = max(1.0 * inch, (ml / total_len) * available_width)
+                col_widths.append(cw)
+                
+            sum_cw = sum(col_widths)
+            if sum_cw > 0:
+                col_widths = [cw * (available_width / sum_cw) for cw in col_widths]
+                
+            header_pstyle = ParagraphStyle(
+                'HeaderP',
+                parent=styles['Normal'],
+                fontName='Helvetica-Bold',
+                fontSize=10,
+                textColor=colors.whitesmoke,
+                alignment=TA_CENTER
+            )
+            
+            data_pstyle = ParagraphStyle(
+                'DataP',
+                parent=styles['Normal'],
+                fontName='Helvetica',
+                fontSize=9,
+                alignment=TA_CENTER
+            )
+
+            # Build mini-table (Removed Role Column)
+            formatted_table_data = [[
+                Paragraph("Date", header_pstyle), 
+                Paragraph("Shift", header_pstyle), 
+                Paragraph("Room", header_pstyle)
+            ]]
+            for asn in assignments:
+                formatted_table_data.append([
+                    Paragraph(str(asn['date']), data_pstyle),
+                    Paragraph(str(asn['shift']), data_pstyle),
+                    Paragraph(str(asn['room']), data_pstyle)
+                ])
+                
+            t = Table(formatted_table_data, colWidths=col_widths)
             
             t.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),

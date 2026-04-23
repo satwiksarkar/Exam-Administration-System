@@ -493,13 +493,12 @@ def display_schedule(results, teachers, staff, rooms, dates, version_name=None):
 
     csv_data = []
     
-    # Determine req_fac and req_stf from the first result
+    # Determine req_fac and req_stf from the max length in all results
     req_fac = 2
     req_stf = 1
     if results:
-        first = results[0]
-        req_fac = len(first.get('faculties', [1, 2]))  # fallback to 2
-        req_stf = len(first.get('staffs', [1]))         # fallback to 1
+        req_fac = max([len(r.get('faculties', [])) for r in results] + [2])
+        req_stf = max([len(r.get('staffs', [])) for r in results] + [1])
     
     fac_cols = [f'Faculty{i+1}' for i in range(req_fac)]
     stf_cols = [f'Staff{i+1}' for i in range(req_stf)]

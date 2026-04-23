@@ -48,3 +48,15 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+
+# Local SQLite fallback database (generated at runtime)
+database/local_schedules.db
+
+# Generated schedule outputs (runtime artifacts)
+schedule_storage/*.csv
+schedule_storage/*.pdf
+
+# Database text files with real names (optional: comment out to persist these)
+# database/teachers.txt
+# database/staffs.txt
+# database/rooms.txt
