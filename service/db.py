@@ -3,6 +3,7 @@ import logging
 import sys
 import time
 import sqlite3
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def setup_database():
             CREATE TABLE IF NOT EXISTS schedules (
                 id SERIAL PRIMARY KEY,
                 version_name VARCHAR(100) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at VARCHAR(50)
             )""")
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS assignments (
@@ -328,7 +329,10 @@ def save_schedule_to_db(version_name, schedule_results):
         conn = _get_sqlite_conn()
         try:
             cur = conn.cursor()
-            cur.execute("INSERT INTO schedules (version_name) VALUES (?)", (version_name,))
+            from datetime import timedelta
+            # Increment time by 5.5 hours to match IST
+            ist_now = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
+            cur.execute("INSERT INTO schedules (version_name, created_at) VALUES (?, ?)", (version_name, ist_now))
             schedule_id = cur.lastrowid
             _insert_assignments(cur, schedule_id, schedule_results, placeholder='?')
             conn.commit()
@@ -346,7 +350,10 @@ def save_schedule_to_db(version_name, schedule_results):
             raise ConnectionError(f"Database unavailable: {err}")
         try:
             with conn.cursor() as cursor:
-                cursor.execute("INSERT INTO schedules (version_name) VALUES (%s) RETURNING id", (version_name,))
+                from datetime import timedelta
+                # Increment time by 5.5 hours to match IST
+                ist_now = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
+                cursor.execute("INSERT INTO schedules (version_name, created_at) VALUES (%s, %s) RETURNING id", (version_name, ist_now))
                 result = cursor.fetchone()
                 if not result:
                     raise Exception("Failed to insert schedule and retrieve ID")

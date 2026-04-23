@@ -1,18 +1,81 @@
 # Quick Start Guide
 
-## Installation & Setup
+## Option 1: Docker (Recommended)
+
+### Prerequisites
+- Docker installed ([Download Docker Desktop](https://www.docker.com/products/docker-desktop))
+
+### 1. Clone or navigate to the project
+```bash
+cd ExamAdministrationSystem
+```
+
+### 2. Create environment file (optional - uses defaults)
+```bash
+cp .env.example .env
+```
+Edit `.env` if you want to customize database credentials or port numbers.
+
+### 3. Start the application with Docker Compose
+```bash
+docker-compose up -d
+```
+
+The first run will build the image and start both the PostgreSQL database and Flask application.
+
+### 4. Access the application
+- **Web Application**: http://localhost:10000
+- **Database**: localhost:5432
+
+### 5. View logs
+```bash
+docker-compose logs -f exam-admin
+```
+
+### 6. Stop the application
+```bash
+docker-compose down
+```
+
+To also remove the database volume:
+```bash
+docker-compose down -v
+```
+
+---
+
+## Option 2: Local Installation (Development)
+
+### Prerequisites
+- Python 3.11+
+- PostgreSQL 15+
 
 ### 1. Navigate to project directory
 ```bash
-cd project_1_did
+cd ExamAdministrationSystem
 ```
 
-### 2. Install dependencies
+### 2. Create virtual environment
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS/Linux
+source venv/bin/activate
+```
+
+### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the Flask application
+### 4. Start PostgreSQL
+Ensure PostgreSQL is running and create the database:
+```sql
+CREATE DATABASE exam_db;
+```
+
+### 5. Run the Flask application
 ```bash
 python app.py
 ```
@@ -24,8 +87,8 @@ You should see output like:
  * Running on http://127.0.0.1:5000
 ```
 
-### 4. Open in browser
-Navigate to: `http://localhost:5000`
+### 6. Open in browser
+Navigate to: `http://localhost:5000` or `http://localhost:10000`
 
 ---
 
