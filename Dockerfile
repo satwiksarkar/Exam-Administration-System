@@ -35,18 +35,18 @@ COPY schedule_storage/ ./schedule_storage/
 # Create necessary directories
 RUN mkdir -p schedule_storage database
 
-# Expose port
-EXPOSE 10000
+# Expose port (Internal Container Port)
+EXPOSE 5000
 
 # Set environment variables
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
-ENV PORT=10000
+ENV PORT=5000
 
-# Health check
+# Health check (Checking internal port 5000)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:10000')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000')" || exit 1
 
-# Run Flask application with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "2", "--timeout", "120", "app:app"]
+# Run Flask application with gunicorn on internal port 5000
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]

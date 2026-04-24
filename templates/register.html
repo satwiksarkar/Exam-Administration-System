@@ -789,16 +789,240 @@
                 width: 100%;
             }
         }
+        /* ── Top Navigation Bar ── */
+        .top-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 2rem;
+            background: #1a1a2e;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            font-family: 'Inter', sans-serif;
+            width: 100%;
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: #fff;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .nav-brand i {
+            color: #00c9a7;
+            font-size: 1.4rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .nav-link-item {
+            color: #b0b0b0;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            padding: 0.5rem 0;
+            border-bottom: 2px solid transparent;
+        }
+
+        .nav-link-item:hover {
+            color: #fff;
+        }
+
+        .nav-link-item.active {
+            color: #00c9a7;
+            border-bottom-color: #00c9a7;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #e0e0e0;
+            font-size: 0.85rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .user-info i {
+            color: #00c9a7;
+        }
+
+        .logout-btn {
+            background: rgba(231, 76, 60, 0.15);
+            color: #ff6b6b;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 0.4rem 0.9rem;
+            border-radius: 6px;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .logout-btn:hover {
+            background: #e74c3c;
+            color: #fff;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 
 <body>
+    <nav class="top-nav">
+        <a href="/" class="nav-brand">
+            <i class="fas fa-calendar-check"></i>
+            <span>ExamAdmin</span>
+        </a>
+        
+        <div class="nav-links">
+            <a href="/" class="nav-link-item">Dashboard</a>
+            <a href="/register" class="nav-link-item active">Resources</a>
+        </div>
+
+        <div class="user-profile">
+            <div class="user-info">
+                <i class="fas fa-user-circle"></i>
+                <span>{{ username }}</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button onclick="showChangePasswordModal()" class="logout-btn" style="background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.2); color: #6366f1; cursor: pointer;">
+                    <i class="fas fa-key"></i> Change Password
+                </button>
+                <button onclick="deleteAccount()" class="logout-btn" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: #ef4444; cursor: pointer;">
+                    <i class="fas fa-trash-alt"></i> Delete Account
+                </button>
+                <a href="/logout" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;">
+        <div style="background: #1e293b; padding: 2rem; border-radius: 1rem; width: 100%; max-width: 400px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h2 style="margin-bottom: 1.5rem; color: #fff; display: flex; align-items: center; gap: 0.75rem;">
+                <i class="fas fa-key" style="color: #6366f1;"></i> Change Password
+            </h2>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.875rem;">Old Password</label>
+                <input type="password" id="oldPassword" style="width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; color: #fff;">
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.875rem;">New Password</label>
+                <input type="password" id="newPassword" style="width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; color: #fff;">
+            </div>
+            <div style="margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.875rem;">Confirm New Password</label>
+                <input type="password" id="confirmNewPassword" style="width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; color: #fff;">
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button onclick="hideChangePasswordModal()" style="padding: 0.75rem 1.5rem; background: transparent; color: #94a3b8; border: none; cursor: pointer; font-weight: 600;">Cancel</button>
+                <button onclick="submitChangePassword()" style="padding: 0.75rem 1.5rem; background: #6366f1; color: #fff; border: none; border-radius: 0.5rem; cursor: pointer; font-weight: 600;">Update Password</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showChangePasswordModal() {
+            document.getElementById('changePasswordModal').style.display = 'flex';
+        }
+
+        function hideChangePasswordModal() {
+            document.getElementById('changePasswordModal').style.display = 'none';
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmNewPassword').value = '';
+        }
+
+        async function submitChangePassword() {
+            const old_password = document.getElementById('oldPassword').value;
+            const new_password = document.getElementById('newPassword').value;
+            const confirm_password = document.getElementById('confirmNewPassword').value;
+
+            if (!old_password || !new_password || !confirm_password) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            if (new_password !== confirm_password) {
+                alert('New passwords do not match');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ old_password, new_password })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(result.message);
+                    hideChangePasswordModal();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('An error occurred: ' + error);
+            }
+        }
+
+        async function deleteAccount() {
+            if (!confirm("⚠️ WARNING: This will permanently delete your account and ALL your saved data (teachers, staff, rooms, and schedules). This action CANNOT be undone.\n\nAre you sure you want to proceed?")) {
+                return;
+            }
+            
+            if (!confirm("FINAL CONFIRMATION: Are you absolutely sure?")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/delete-account', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(result.message);
+                    window.location.href = '/login';
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('An error occurred: ' + error);
+            }
+        }
+    </script>
+
     <div class="container">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
                 <h1>📋 Registration System</h1>
-                <p style="color: black;">Manage Teachers, Staffs, and Rooms</p>
+                <p style="color: #64748b;">Manage Teachers, Staff, and Exam Rooms</p>
             </div>
         </header>
 

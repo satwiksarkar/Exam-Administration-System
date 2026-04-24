@@ -40,32 +40,130 @@ if not os.path.exists(SCHEDULE_STORAGE_DIR):
 logger.info('🚀 Starting Exam Scheduling System')
 logger.info(f'📁 Schedule storage directory: {SCHEDULE_STORAGE_DIR}')
 
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# ... existing code ...
+
 # Create Flask app with correct paths
 app = Flask(__name__, template_folder='templates', static_folder='static')
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-123') # Change this in production
+
+# Setup Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
 # Import the scheduling logic and constants
 from service.schedule import formal_scheduler_api, MAIN_SCHEDULE_CSV, TEACHER_SCHEDULE_CSV, STAFF_SCHEDULE_CSV, ROOM_SCHEDULE_CSV
-from service.db import read_teachers, read_staff, read_rooms, add_teacher, add_staff, add_room, delete_teacher, delete_staff, delete_room, get_all_data, delete_all_teachers, delete_all_staff
+from service.db import (
+    read_teachers, read_staff, read_rooms, add_teacher, add_staff, add_room, 
+    delete_teacher, delete_staff, delete_room, get_all_data, delete_all_teachers, 
+    delete_all_staff, get_user_by_id, get_user_by_username, create_user, delete_user, update_password
+)
 from service.createTable import create_table_pdf, create_room_tables_pdf
 
+# ... existing routes ...
+
+@app.route("/api/change-password", methods=['POST'])
+@login_required
+def api_change_password():
+    """Change user password after verifying old password"""
+    try:
+        data = request.json
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        if not old_password or not new_password:
+            return jsonify({'success': False, 'error': 'Old and new passwords are required'}), 400
+            
+        # Verify old password
+        user = get_user_by_id(current_user.id)
+        # Note: get_user_by_id currently doesn't fetch the password hash. 
+        # I need to make sure I have it. 
+        # Actually, let's use get_user_by_username or modify get_user_by_id.
+        
+        # Re-fetching user with password
+        user_with_pw = get_user_by_username(current_user.username)
+        
+        if not user_with_pw or not check_password_hash(user_with_pw.password, old_password):
+            return jsonify({'success': False, 'error': 'Incorrect old password'}), 401
+            
+        if update_password(current_user.id, new_password):
+            return jsonify({'success': True, 'message': 'Password updated successfully'})
+        return jsonify({'success': False, 'error': 'Failed to update password'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ... existing routes ...
+
+@app.route("/api/delete-account", methods=['POST'])
+@login_required
+def api_delete_account():
+    """Permanently delete user account and all data"""
+    try:
+        user_id = current_user.id
+        if delete_user(user_id):
+            logout_user()
+            return jsonify({'success': True, 'message': 'Account deleted successfully'})
+        return jsonify({'success': False, 'error': 'Failed to delete account'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@login_manager.user_loader
+def load_user(user_id):
+    return get_user_by_id(int(user_id))
+
 @app.route('/')
+@login_required
 def index():
-    logger.info('📄 Loading main scheduling interface')
-    return render_template('index.html')
+    logger.info(f'📄 Loading main scheduling interface for user: {current_user.username}')
+    return render_template('index.html', username=current_user.username)
+
+@app.route("/login", methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = get_user_by_username(username)
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            return jsonify({'success': True, 'message': 'Logged in successfully'})
+        return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+    return render_template('login.html')
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return render_template('login.html', message="Logged out successfully")
+
+@app.route("/register_account", methods=['GET', 'POST'])
+def register_account():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        if create_user(username, password):
+            return jsonify({'success': True, 'message': 'Account created successfully'})
+        return jsonify({'success': False, 'error': 'Username already exists'}), 400
+    return render_template('register_account.html')
 
 @app.route("/register")
+@login_required
 def register():
     """Registration page for teachers, staff, and rooms"""
-    data = get_all_data()
-    return render_template('register.html', **data)
+    data = get_all_data(current_user.id)
+    return render_template('register.html', username=current_user.username, **data)
 
 @app.route('/api/data', methods=['GET'])
+@login_required
 def api_data():
     """Return teachers, staff, and rooms for client-side preference setup"""
-    data = get_all_data()
+    data = get_all_data(current_user.id)
     return jsonify({'success': True, 'data': data})
 
 @app.route("/api/register-teacher", methods=['POST'])
+@login_required
 def register_teacher():
     """API to register a teacher"""
     try:
@@ -74,7 +172,7 @@ def register_teacher():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if add_teacher(name):
+        if add_teacher(current_user.id, name):
             return jsonify({'success': True, 'message': f'Teacher {name} added successfully'})
         else:
             return jsonify({'success': False, 'error': 'Teacher already exists'}), 400
@@ -82,6 +180,7 @@ def register_teacher():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/register-staff", methods=['POST'])
+@login_required
 def register_staff():
     """API to register a staff member"""
     try:
@@ -90,7 +189,7 @@ def register_staff():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if add_staff(name):
+        if add_staff(current_user.id, name):
             return jsonify({'success': True, 'message': f'Staff {name} added successfully'})
         else:
             return jsonify({'success': False, 'error': 'Staff already exists'}), 400
@@ -98,6 +197,7 @@ def register_staff():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/delete-teacher", methods=['POST'])
+@login_required
 def api_delete_teacher():
     """API to delete a teacher"""
     try:
@@ -106,7 +206,7 @@ def api_delete_teacher():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if delete_teacher(name):
+        if delete_teacher(current_user.id, name):
             return jsonify({'success': True, 'message': f'Teacher {name} deleted successfully'})
         else:
             return jsonify({'success': False, 'error': 'Teacher not found'}), 404
@@ -114,6 +214,7 @@ def api_delete_teacher():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/delete-staff", methods=['POST'])
+@login_required
 def api_delete_staff():
     """API to delete a staff member"""
     try:
@@ -122,7 +223,7 @@ def api_delete_staff():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if delete_staff(name):
+        if delete_staff(current_user.id, name):
             return jsonify({'success': True, 'message': f'Staff {name} deleted successfully'})
         else:
             return jsonify({'success': False, 'error': 'Staff not found'}), 404
@@ -130,10 +231,11 @@ def api_delete_staff():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/delete-all-teachers", methods=['POST'])
+@login_required
 def api_delete_all_teachers():
     """API to delete all teachers"""
     try:
-        if delete_all_teachers():
+        if delete_all_teachers(current_user.id):
             logger.info('🗑️ All teachers deleted')
             return jsonify({'success': True, 'message': 'All teachers deleted successfully'})
         else:
@@ -143,10 +245,11 @@ def api_delete_all_teachers():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/delete-all-staff", methods=['POST'])
+@login_required
 def api_delete_all_staff():
     """API to delete all staff"""
     try:
-        if delete_all_staff():
+        if delete_all_staff(current_user.id):
             logger.info('🗑️ All staff deleted')
             return jsonify({'success': True, 'message': 'All staff deleted successfully'})
         else:
@@ -156,6 +259,7 @@ def api_delete_all_staff():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/register-room", methods=['POST'])
+@login_required
 def register_room():
     """API to register a room"""
     try:
@@ -164,7 +268,7 @@ def register_room():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if add_room(name):
+        if add_room(current_user.id, name):
             return jsonify({'success': True, 'message': f'Room {name} added successfully'})
         else:
             return jsonify({'success': False, 'error': 'Room already exists'}), 400
@@ -172,6 +276,7 @@ def register_room():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/delete-room", methods=['POST'])
+@login_required
 def api_delete_room():
     """API to delete a room"""
     try:
@@ -180,7 +285,7 @@ def api_delete_room():
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
-        if delete_room(name):
+        if delete_room(current_user.id, name):
             return jsonify({'success': True, 'message': f'Room {name} deleted successfully'})
         else:
             return jsonify({'success': False, 'error': 'Room not found'}), 404
@@ -188,6 +293,7 @@ def api_delete_room():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route("/api/upload-pdf-list", methods=['POST'])
+@login_required
 def upload_pdf_list():
     """API to parse a PDF and bulk add teachers or staff"""
     try:
@@ -264,10 +370,10 @@ def upload_pdf_list():
                 # Minimum length to be considered a name
                 if len(cleaned_name) > 2:
                     if role == 'teacher':
-                        if add_teacher(cleaned_name):
+                        if add_teacher(current_user.id, cleaned_name):
                             added_count += 1
                     elif role == 'staff':
-                        if add_staff(cleaned_name):
+                        if add_staff(current_user.id, cleaned_name):
                             added_count += 1
                             
             return jsonify({
@@ -282,6 +388,7 @@ def upload_pdf_list():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/api/schedule', methods=['POST'])
+@login_required
 def generate_schedule():
     """Generate the invigilation schedule based on selected exam dates"""
     try:
@@ -306,9 +413,9 @@ def generate_schedule():
         shifts = ["Morning", "Afternoon"]
         
         # Read data from database
-        teachers = read_teachers()
-        staff = read_staff()
-        rooms = read_rooms()
+        teachers = read_teachers(current_user.id)
+        staff = read_staff(current_user.id)
+        rooms = read_rooms(current_user.id)
         
         logger.info(f'✓ Loaded {len(teachers)} teachers, {len(staff)} staff, {len(rooms)} rooms')
         
@@ -389,6 +496,7 @@ def generate_schedule():
         }), 400
 
 @app.route('/api/emergency_reschedule', methods=['POST'])
+@login_required
 def emergency_reschedule():
     """Takes an absentee and date, loads DB, and regenerates balanced schedule."""
     try:
@@ -401,7 +509,7 @@ def emergency_reschedule():
         if not person or not em_date or not schedule_id:
             return jsonify({'success': False, 'error': 'Person, emergency date, and schedule ID required.'}), 400
             
-        locked_assignments = get_schedule_assignments(schedule_id)
+        locked_assignments = get_schedule_assignments(current_user.id, schedule_id)
         if not locked_assignments:
             return jsonify({'success': False, 'error': 'No prior schedule found in database for that ID.'}), 400
             
@@ -435,9 +543,9 @@ def emergency_reschedule():
                 except (ValueError, IndexError):
                     pass
         
-        teachers = read_teachers()
-        staff = read_staff()
-        rooms = read_rooms()
+        teachers = read_teachers(current_user.id)
+        staff = read_staff(current_user.id)
+        rooms = read_rooms(current_user.id)
         shifts = ["Morning", "Afternoon"]
 
         
@@ -477,10 +585,11 @@ def emergency_reschedule():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/routines', methods=['GET'])
+@login_required
 def get_routines():
     try:
         from service.db import get_all_schedules
-        routines = get_all_schedules()
+        routines = get_all_schedules(current_user.id)
         # get_all_schedules already returns plain dicts.
         # Normalize created_at: PostgreSQL returns datetime obj, SQLite returns string.
         plain_routines = []
@@ -497,16 +606,17 @@ def get_routines():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/routine/<int:schedule_id>', methods=['GET'])
+@login_required
 def get_routine(schedule_id):
     try:
         from service.db import get_schedule_assignments, read_teachers, read_staff, read_rooms
-        assignments = get_schedule_assignments(schedule_id)
+        assignments = get_schedule_assignments(current_user.id, schedule_id)
         if not assignments:
             return jsonify({'success': False, 'error': 'Routine not found'}), 404
         
-        teachers = read_teachers()
-        staff = read_staff()
-        rooms = read_rooms()
+        teachers = read_teachers(current_user.id)
+        staff = read_staff(current_user.id)
+        rooms = read_rooms(current_user.id)
         
         # Normalise exam_date: PostgreSQL might return datetime.date objects; convert to plain "YYYY-MM-DD" strings
         for a in assignments:
@@ -561,6 +671,7 @@ def get_routine(schedule_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/save_routine', methods=['POST'])
+@login_required
 def save_routine_api():
     try:
         data = request.json
@@ -587,7 +698,7 @@ def save_routine_api():
             })
             
         from service.db import save_schedule_to_db
-        schedule_id = save_schedule_to_db(version_name, db_results)
+        schedule_id = save_schedule_to_db(current_user.id, version_name, db_results)
         return jsonify({'success': True, 'message': 'Routine saved successfully', 'id': schedule_id})
             
     except Exception as e:
@@ -596,10 +707,11 @@ def save_routine_api():
 
 
 @app.route('/api/routine/<int:schedule_id>', methods=['DELETE'])
+@login_required
 def delete_routine_api(schedule_id):
     try:
         from service.db import delete_schedule
-        if delete_schedule(schedule_id):
+        if delete_schedule(current_user.id, schedule_id):
             return jsonify({'success': True, 'message': 'Routine deleted successfully'})
         else:
             return jsonify({'success': False, 'error': 'Failed to delete routine'}), 400
@@ -608,6 +720,7 @@ def delete_routine_api(schedule_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/routine/<int:schedule_id>', methods=['PUT'])
+@login_required
 def rename_routine_api(schedule_id):
     try:
         data = request.json
@@ -616,7 +729,7 @@ def rename_routine_api(schedule_id):
             return jsonify({'success': False, 'error': 'New name is required'}), 400
             
         from service.db import rename_schedule
-        if rename_schedule(schedule_id, new_name):
+        if rename_schedule(current_user.id, schedule_id, new_name):
             return jsonify({'success': True, 'message': 'Routine renamed successfully'})
         else:
             return jsonify({'success': False, 'error': 'Failed to rename routine'}), 400

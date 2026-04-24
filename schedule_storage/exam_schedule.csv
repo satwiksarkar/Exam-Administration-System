@@ -1,9 +1,13 @@
 Date,Room,Shift,Faculty1,Faculty2,Staff1
-2026-04-29,Room 101,Morning,2,3,s2
-2026-04-29,Room 101,Afternoon,Dr. Chloe Harrison,Prof. Benjamin Choi,s2
-2026-04-29,Room 102,Morning,Dr. David OConnor,Dr. Marcus Thorne,S3
-2026-04-29,Room 102,Afternoon,Prof. Sarah Jenkins,Prof. Olivia Martinez,S3
-2026-04-30,Room 101,Morning,Dr. David OConnor,2,s2
-2026-04-30,Room 101,Afternoon,Dr. Chloe Harrison,Prof. Sarah Jenkins,s2
-2026-04-30,Room 102,Morning,Prof. Benjamin Choi,Dr. Marcus Thorne,S3
-2026-04-30,Room 102,Afternoon,Prof. Olivia Martinez,3,S3
+2026-04-17,1,Morning,Dr. Eleanor Vance,Dr. Marcus Thorne,Raju
+2026-04-17,1,Afternoon,Prof. Arthur Pendelton,Prof. Sarah Jenkins,Raju
+2026-04-17,2,Morning,Dr. Chloe Harrison,Prof. Margaret Lin,Bheem
+2026-04-17,2,Afternoon,Dr. Samuel Hughes,Prof. Benjamin Choi,Bheem
+2026-04-24,1,Morning,Dr. Marcus Thorne,Prof. Olivia Martinez,Raju
+2026-04-24,1,Afternoon,Dr. Samuel Hughes,Prof. Sarah Jenkins,Raju
+2026-04-24,2,Morning,Dr. David OConnor,Prof. Benjamin Choi,Bheem
+2026-04-24,2,Afternoon,Dr. Eleanor Vance,Prof. Arthur Pendelton,Bheem
+2026-04-22,1,Morning,Prof. Margaret Lin,Prof. Olivia Martinez,Raju
+2026-04-22,1,Afternoon,Prof. Arthur Pendelton,Prof. Benjamin Choi,Raju
+2026-04-22,2,Morning,Dr. Chloe Harrison,Dr. Eleanor Vance,Bheem
+2026-04-22,2,Afternoon,Dr. Marcus Thorne,Prof. Sarah Jenkins,Bheem
